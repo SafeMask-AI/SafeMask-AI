@@ -15,6 +15,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
+import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
@@ -28,7 +29,8 @@ import java.time.LocalDateTime;
 public class AiRun {
 
 	@Id
-	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@SequenceGenerator(name = "ai_run_seq_gen", sequenceName = "SAFEMASK_AI_RUN_SEQ", allocationSize = 1)
+	@GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "ai_run_seq_gen")
 	private Long id;
 
 	/** 실행이 발생한 채팅방 */

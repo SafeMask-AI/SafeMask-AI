@@ -13,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
@@ -31,7 +32,8 @@ import java.time.LocalDateTime;
 public class MaskingEntity {
 
 	@Id
-	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@SequenceGenerator(name = "masking_entity_seq_gen", sequenceName = "SAFEMASK_MASKING_ENTITY_SEQ", allocationSize = 1)
+	@GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "masking_entity_seq_gen")
 	private Long id;
 
 	/** 이 민감정보가 탐지된 AI 실행 */

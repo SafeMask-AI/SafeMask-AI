@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
+import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
@@ -26,7 +27,8 @@ import java.time.LocalDateTime;
 public class MaskingRule {
 
 	@Id
-	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@SequenceGenerator(name = "masking_rule_seq_gen", sequenceName = "SAFEMASK_MASKING_RULE_SEQ", allocationSize = 1)
+	@GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "masking_rule_seq_gen")
 	private Long id;
 
 	/** 규칙 이름 (관리 화면 표시용, 예: "휴대폰 번호") */

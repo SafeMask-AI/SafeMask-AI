@@ -14,6 +14,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Lob;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
+import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
@@ -33,7 +34,8 @@ import java.time.LocalDateTime;
 public class ChatMessage {
 
 	@Id
-	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@SequenceGenerator(name = "chat_message_seq_gen", sequenceName = "SAFEMASK_CHAT_MESSAGE_SEQ", allocationSize = 1)
+	@GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "chat_message_seq_gen")
 	private Long id;
 
 	/** 메시지가 속한 채팅방 */

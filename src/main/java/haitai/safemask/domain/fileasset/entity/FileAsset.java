@@ -14,6 +14,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
+import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
@@ -26,7 +27,8 @@ import java.time.LocalDateTime;
 public class FileAsset {
 
 	@Id
-	@GeneratedValue(strategy = GenerationType.IDENTITY)
+	@SequenceGenerator(name = "file_asset_seq_gen", sequenceName = "SAFEMASK_FILE_ASSET_SEQ", allocationSize = 1)
+	@GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "file_asset_seq_gen")
 	private Long id;
 
 	/** 파일이 업로드된 채팅방 */
