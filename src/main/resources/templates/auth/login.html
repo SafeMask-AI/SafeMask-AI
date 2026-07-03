@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>로그인 - 해태 사내 AI</title>
+	<link rel="stylesheet" th:href="@{/css/auth.css}">
+</head>
+<body>
+<div class="auth-layout">
+
+	<!-- ==================== 좌측: 로그인 폼 ==================== -->
+	<section class="auth-form-panel">
+		<div class="form-inner">
+
+		<!-- 로고 + 서비스명 -->
+		<div class="auth-logo-row">
+			<img th:src="@{/images/haitai-logo.jpg}" alt="해태 로고">
+			<div class="divider"></div>
+			<div>
+				<div class="service-name">해태 사내 <span class="highlight">AI</span></div>
+				<div class="service-desc">민감정보 자동 마스킹</div>
+			</div>
+		</div>
+
+		<h1 class="auth-title">로그인</h1>
+		<p class="auth-subtitle">사번과 비밀번호로 로그인하세요.</p>
+
+		<!-- 로그인 폼: submit 시 login.js가 /api/auth/login을 호출합니다. -->
+		<form id="loginForm" novalidate>
+			<div class="form-group">
+				<label for="loginId">사번</label>
+				<input type="text" id="loginId" name="loginId" placeholder="예) 20194412" autocomplete="username" required>
+			</div>
+
+			<div class="form-group">
+				<label for="password">비밀번호</label>
+				<input type="password" id="password" name="password" placeholder="비밀번호를 입력하세요"
+					autocomplete="current-password" required>
+			</div>
+
+			<!-- 로그인 실패 시 에러 메시지가 표시되는 영역 -->
+			<p id="loginMessage" class="form-message error"></p>
+
+			<button type="submit" id="loginButton" class="btn-primary">로그인</button>
+		</form>
+
+		<p class="auth-footer-link">
+			아직 계정이 없으신가요?<a th:href="@{/signup}">회원가입</a>
+		</p>
+
+		<p class="auth-copyright">&copy; HAITAI Confectionery &amp; Foods</p>
+		</div>
+	</section>
+
+	<!-- ==================== 우측: 브랜딩 패널 ==================== -->
+	<section class="auth-brand-panel">
+		<div class="brand-content">
+			<div class="brand-logo-box">
+				<img th:src="@{/images/haitai-logo.jpg}" alt="해태 로고">
+			</div>
+
+			<h2 class="brand-title">해태 사내 AI</h2>
+			<p class="brand-desc">
+				민감정보는 사내 서버에서 먼저 가린 뒤, 마스킹된 데이터만 AI에 전달합니다.
+				답변은 다시 원본 문맥으로 복원해 보여드립니다.
+			</p>
+
+			<!-- 마스킹 동작 예시 카드 -->
+			<div class="masking-card">
+				<div class="card-header">
+					<span class="card-label">원본 자료</span>
+					<span class="dots"><span></span><span></span><span></span></span>
+				</div>
+
+				<p class="original-line">
+					담당자 <strong>김철수</strong> · <span class="pink">010-1234-5678</span>
+				</p>
+				<p class="original-line">
+					<span class="pink">chulsoo.kim@hanil.co.kr</span>
+				</p>
+
+				<div class="arrow-row">&#8595; 사내 서버에서 토큰화</div>
+
+				<div class="token-row">
+					<span class="token">[PERSON_001]</span>
+					<span class="token">[PHONE_001]</span>
+					<span class="token">[EMAIL_001]</span>
+				</div>
+
+				<p class="check-line">&#10003; 마스킹된 데이터만 GPT로 전송됩니다</p>
+			</div>
+		</div>
+	</section>
+</div>
+
+<script th:src="@{/js/login.js}"></script>
+</body>
+</html>

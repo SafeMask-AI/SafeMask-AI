@@ -32,3 +32,11 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+
+# JWT 토큰 발급/검증에 사용하는 설정입니다.
+# secret은 HS256 서명 키로 사용되므로 최소 32바이트(256비트) 이상의 문자열이어야 하며,
+# 실제 값은 .env 파일에서 주입합니다. (JwtProperties에서 바인딩)
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION:3600000}      # Access Token 만료(ms), 기본 1시간
+  refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION:1209600000} # Refresh Token 만료(ms), 기본 14일

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>회원가입 - 해태 사내 AI</title>
+	<link rel="stylesheet" th:href="@{/css/auth.css}">
+</head>
+<body>
+<div class="auth-layout">
+
+	<!-- ==================== 좌측: 단계별 회원가입 폼 ==================== -->
+	<section class="auth-form-panel">
+		<div class="form-inner">
+
+		<!-- 로고 + 서비스명 -->
+		<div class="auth-logo-row">
+			<img th:src="@{/images/haitai-logo.jpg}" alt="해태 로고">
+			<div class="divider"></div>
+			<div>
+				<div class="service-name">해태 사내 <span class="highlight">AI</span></div>
+				<div class="service-desc">민감정보 자동 마스킹</div>
+			</div>
+		</div>
+
+		<h1 class="auth-title">회원가입</h1>
+		<p class="auth-subtitle">단계별로 정보를 입력해 주세요.</p>
+
+		<!-- 진행 단계 표시: signup.js가 active/done 클래스를 갱신합니다. -->
+		<div class="step-indicator" id="stepIndicator">
+			<span class="step active" data-step="1">1</span>
+			<span class="step-line"></span>
+			<span class="step" data-step="2">2</span>
+			<span class="step-line"></span>
+			<span class="step" data-step="3">3</span>
+			<span class="step-line"></span>
+			<span class="step" data-step="4">4</span>
+		</div>
+
+		<form id="signupForm" novalidate>
+
+			<!-- 1단계: 사번 (중복 확인 후 다음 단계로) -->
+			<div class="signup-step active" data-step="1">
+				<div class="form-group">
+					<label for="loginId">사번</label>
+					<input type="text" id="loginId" placeholder="예) 20194412" autocomplete="username">
+					<p class="field-hint">로그인 아이디로 사용됩니다.</p>
+				</div>
+				<p id="message1" class="form-message error"></p>
+				<button type="button" class="btn-primary" id="nextButton1">다음</button>
+			</div>
+
+			<!-- 2단계: 이메일 (중복 확인 후 다음 단계로) -->
+			<div class="signup-step" data-step="2">
+				<div class="form-group">
+					<label for="email">이메일</label>
+					<input type="email" id="email" placeholder="예) hong@haitai.co.kr" autocomplete="email">
+				</div>
+				<p id="message2" class="form-message error"></p>
+				<button type="button" class="btn-primary" id="nextButton2">다음</button>
+				<button type="button" class="btn-secondary" data-prev="1">이전</button>
+			</div>
+
+			<!-- 3단계: 이름 / 부서 -->
+			<div class="signup-step" data-step="3">
+				<div class="form-group">
+					<label for="name">이름</label>
+					<input type="text" id="name" placeholder="예) 홍길동" autocomplete="name">
+				</div>
+				<div class="form-group">
+					<label for="department">부서</label>
+					<input type="text" id="department" placeholder="예) 마케팅팀">
+				</div>
+				<p id="message3" class="form-message error"></p>
+				<button type="button" class="btn-primary" id="nextButton3">다음</button>
+				<button type="button" class="btn-secondary" data-prev="2">이전</button>
+			</div>
+
+			<!-- 4단계: 비밀번호 설정 후 최종 가입 -->
+			<div class="signup-step" data-step="4">
+				<div class="form-group">
+					<label for="password">비밀번호</label>
+					<input type="password" id="password" placeholder="8자 이상, 영문자와 숫자 포함"
+						autocomplete="new-password">
+				</div>
+				<div class="form-group">
+					<label for="passwordConfirm">비밀번호 확인</label>
+					<input type="password" id="passwordConfirm" placeholder="비밀번호를 한 번 더 입력하세요"
+						autocomplete="new-password">
+				</div>
+				<p id="message4" class="form-message error"></p>
+				<button type="submit" class="btn-primary" id="submitButton">가입하기</button>
+				<button type="button" class="btn-secondary" data-prev="3">이전</button>
+			</div>
+		</form>
+
+		<p class="auth-footer-link">
+			이미 계정이 있으신가요?<a th:href="@{/login}">로그인</a>
+		</p>
+
+		<p class="auth-copyright">&copy; HAITAI Confectionery &amp; Foods</p>
+		</div>
+	</section>
+
+	<!-- ==================== 우측: 브랜딩 패널 (로그인 화면과 동일) ==================== -->
+	<section class="auth-brand-panel">
+		<div class="brand-content">
+			<div class="brand-logo-box">
+				<img th:src="@{/images/haitai-logo.jpg}" alt="해태 로고">
+			</div>
+
+			<h2 class="brand-title">해태 사내 AI</h2>
+			<p class="brand-desc">
+				민감정보는 사내 서버에서 먼저 가린 뒤, 마스킹된 데이터만 AI에 전달합니다.
+				답변은 다시 원본 문맥으로 복원해 보여드립니다.
+			</p>
+
+			<div class="masking-card">
+				<div class="card-header">
+					<span class="card-label">원본 자료</span>
+					<span class="dots"><span></span><span></span><span></span></span>
+				</div>
+
+				<p class="original-line">
+					담당자 <strong>김철수</strong> · <span class="pink">010-1234-5678</span>
+				</p>
+				<p class="original-line">
+					<span class="pink">chulsoo.kim@hanil.co.kr</span>
+				</p>
+
+				<div class="arrow-row">&#8595; 사내 서버에서 토큰화</div>
+
+				<div class="token-row">
+					<span class="token">[PERSON_001]</span>
+					<span class="token">[PHONE_001]</span>
+					<span class="token">[EMAIL_001]</span>
+				</div>
+
+				<p class="check-line">&#10003; 마스킹된 데이터만 GPT로 전송됩니다</p>
+			</div>
+		</div>
+	</section>
+</div>
+
+<script th:src="@{/js/signup.js}"></script>
+</body>
+</html>

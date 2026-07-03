@@ -1,0 +1,438 @@
+/*
+ * 로그인/회원가입 화면 공통 스타일입니다.
+ *
+ * 화면 구성: 좌측 흰색 패널(폼) + 우측 핑크 그라데이션 패널(브랜딩)
+ * 브랜드 컬러는 해태 로고의 마젠타 핑크(#ED1E79 계열)를 기준으로 합니다.
+ */
+
+:root {
+	--brand-pink: #ed1e79;
+	--brand-pink-dark: #c4136b;
+	--brand-pink-deep: #a50f5c;
+	--input-bg: #fdf3f7;
+	--input-border: #f3d9e5;
+	--text-dark: #1f1f1f;
+	--text-gray: #8a8a8a;
+	--text-light-gray: #b5b5b5;
+}
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+body {
+	font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif;
+	color: var(--text-dark);
+}
+
+/* ==================== 전체 레이아웃 (좌/우 분할) ==================== */
+
+.auth-layout {
+	display: flex;
+	min-height: 100vh;
+}
+
+/* 좌측: 폼 영역 (시안처럼 화면의 절반을 차지) */
+.auth-form-panel {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 48px;
+	background: #ffffff;
+}
+
+/* 폼 내용은 좌측 패널 가운데에 적정 폭으로 배치합니다. */
+.form-inner {
+	width: 100%;
+	max-width: 420px;
+}
+
+/* 우측: 브랜딩 영역 */
+.auth-brand-panel {
+	flex: 1;
+	position: relative;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	padding: 64px 72px;
+	background: linear-gradient(135deg, #e4176e 0%, #c4136b 55%, #a50f5c 100%);
+	color: #ffffff;
+}
+
+/* 우측 배경의 장식용 원 */
+.auth-brand-panel::before,
+.auth-brand-panel::after {
+	content: "";
+	position: absolute;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.auth-brand-panel::before {
+	width: 420px;
+	height: 420px;
+	top: -140px;
+	right: -120px;
+}
+
+.auth-brand-panel::after {
+	width: 360px;
+	height: 360px;
+	bottom: -160px;
+	left: -100px;
+}
+
+/* ==================== 좌측 폼 패널 ==================== */
+
+/* 상단 로고 + 서비스명 */
+.auth-logo-row {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	margin-bottom: 56px;
+}
+
+.auth-logo-row img {
+	width: 44px;
+	height: 44px;
+	object-fit: contain;
+}
+
+.auth-logo-row .divider {
+	width: 1px;
+	height: 36px;
+	background: #e5e5e5;
+}
+
+.auth-logo-row .service-name {
+	font-size: 20px;
+	font-weight: 800;
+}
+
+.auth-logo-row .service-name .highlight {
+	color: var(--brand-pink);
+}
+
+.auth-logo-row .service-desc {
+	font-size: 11px;
+	color: var(--text-gray);
+	letter-spacing: 2px;
+	margin-top: 2px;
+}
+
+.auth-title {
+	font-size: 30px;
+	font-weight: 800;
+	margin-bottom: 10px;
+}
+
+.auth-subtitle {
+	font-size: 14px;
+	color: var(--text-gray);
+	margin-bottom: 36px;
+}
+
+/* 입력 필드 */
+.form-group {
+	margin-bottom: 20px;
+}
+
+.form-group label {
+	display: block;
+	font-size: 13px;
+	font-weight: 600;
+	margin-bottom: 8px;
+}
+
+.form-group input {
+	width: 100%;
+	padding: 14px 16px;
+	font-size: 14px;
+	border: 1px solid var(--input-border);
+	border-radius: 10px;
+	background: var(--input-bg);
+	outline: none;
+	transition: border-color 0.15s;
+}
+
+.form-group input:focus {
+	border-color: var(--brand-pink);
+	background: #ffffff;
+}
+
+.form-group .field-hint {
+	font-size: 12px;
+	color: var(--text-light-gray);
+	margin-top: 6px;
+}
+
+/* 에러/성공 메시지 */
+.form-message {
+	font-size: 13px;
+	margin: 4px 0 16px;
+	min-height: 18px;
+}
+
+.form-message.error {
+	color: #d32f2f;
+}
+
+.form-message.success {
+	color: #2e7d32;
+}
+
+/* 메인 버튼 */
+.btn-primary {
+	width: 100%;
+	padding: 15px;
+	font-size: 15px;
+	font-weight: 700;
+	color: #ffffff;
+	background: var(--brand-pink);
+	border: none;
+	border-radius: 10px;
+	cursor: pointer;
+	transition: background 0.15s;
+}
+
+.btn-primary:hover {
+	background: var(--brand-pink-dark);
+}
+
+.btn-primary:disabled {
+	background: #f0a8c9;
+	cursor: not-allowed;
+}
+
+/* 보조 버튼 (회원가입 이전 단계 이동용) */
+.btn-secondary {
+	width: 100%;
+	padding: 13px;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--text-gray);
+	background: #f5f5f5;
+	border: none;
+	border-radius: 10px;
+	cursor: pointer;
+	margin-top: 10px;
+}
+
+.btn-secondary:hover {
+	background: #ececec;
+}
+
+/* 하단 링크 영역 */
+.auth-footer-link {
+	text-align: center;
+	font-size: 13px;
+	color: var(--text-gray);
+	margin-top: 32px;
+}
+
+.auth-footer-link a {
+	color: var(--brand-pink);
+	font-weight: 700;
+	text-decoration: none;
+	margin-left: 6px;
+}
+
+.auth-footer-link a:hover {
+	text-decoration: underline;
+}
+
+.auth-copyright {
+	text-align: center;
+	font-size: 11px;
+	color: var(--text-light-gray);
+	margin-top: 48px;
+}
+
+/* ==================== 우측 브랜딩 패널 ==================== */
+
+.brand-content {
+	position: relative;
+	z-index: 1;
+	max-width: 480px;
+}
+
+.brand-logo-box {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 56px;
+	height: 56px;
+	background: #ffffff;
+	border-radius: 14px;
+	margin-bottom: 28px;
+}
+
+.brand-logo-box img {
+	width: 40px;
+	height: 40px;
+	object-fit: contain;
+}
+
+.brand-title {
+	font-size: 34px;
+	font-weight: 800;
+	margin-bottom: 16px;
+}
+
+.brand-desc {
+	font-size: 14px;
+	line-height: 1.7;
+	opacity: 0.92;
+	margin-bottom: 40px;
+}
+
+/* 마스킹 예시 카드 */
+.masking-card {
+	background: #ffffff;
+	border-radius: 16px;
+	padding: 24px;
+	color: var(--text-dark);
+	box-shadow: 0 20px 40px rgba(0, 0, 0, 0.18);
+}
+
+.masking-card .card-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 14px;
+}
+
+.masking-card .card-header .card-label {
+	font-size: 11px;
+	color: var(--text-light-gray);
+}
+
+.masking-card .card-header .dots {
+	display: flex;
+	gap: 5px;
+}
+
+.masking-card .card-header .dots span {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: #e5e5e5;
+}
+
+.masking-card .original-line {
+	font-size: 14px;
+	margin-bottom: 4px;
+}
+
+.masking-card .original-line strong {
+	margin-right: 6px;
+}
+
+.masking-card .original-line .pink {
+	color: var(--brand-pink);
+	font-weight: 700;
+}
+
+.masking-card .arrow-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 11px;
+	color: var(--text-light-gray);
+	margin: 16px 0 12px;
+}
+
+.masking-card .arrow-row::before,
+.masking-card .arrow-row::after {
+	content: "";
+	flex: 1;
+	height: 1px;
+	background: #f0f0f0;
+}
+
+.masking-card .token-row {
+	display: flex;
+	gap: 10px;
+	flex-wrap: wrap;
+	margin-bottom: 18px;
+}
+
+.masking-card .token {
+	font-family: "Consolas", monospace;
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--brand-pink);
+	background: var(--input-bg);
+	border: 1px solid var(--input-border);
+	border-radius: 8px;
+	padding: 8px 14px;
+}
+
+.masking-card .check-line {
+	font-size: 13px;
+	font-weight: 600;
+	color: #2e7d32;
+}
+
+/* ==================== 회원가입 단계 표시 ==================== */
+
+.step-indicator {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 32px;
+}
+
+.step-indicator .step {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	border-radius: 50%;
+	font-size: 13px;
+	font-weight: 700;
+	background: #f0f0f0;
+	color: var(--text-light-gray);
+}
+
+.step-indicator .step.active {
+	background: var(--brand-pink);
+	color: #ffffff;
+}
+
+.step-indicator .step.done {
+	background: var(--input-bg);
+	color: var(--brand-pink);
+	border: 1px solid var(--input-border);
+}
+
+.step-indicator .step-line {
+	flex: 1;
+	height: 2px;
+	background: #f0f0f0;
+}
+
+/* 단계별 패널: JS가 active 클래스를 토글하며 하나씩만 보여줍니다. */
+.signup-step {
+	display: none;
+}
+
+.signup-step.active {
+	display: block;
+}
+
+/* 반응형: 화면이 좁으면 우측 브랜딩 패널을 숨깁니다. */
+@media (max-width: 900px) {
+	.auth-brand-panel {
+		display: none;
+	}
+
+	.auth-form-panel {
+		padding: 40px 24px;
+	}
+}

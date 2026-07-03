@@ -1,13 +1,17 @@
 package haitai.safemask.global.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
 import java.util.Objects;
+import org.springframework.context.MessageSourceResolvable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.ui.Model;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 
 /**
  * 서비스 전역 예외를 한 곳에서 처리하는 클래스입니다.
@@ -74,6 +78,34 @@ public class GlobalExceptionHandler {
 	}
 
 	/**
+	 * @RequestParam, @PathVariable 등 메서드 파라미터 검증 실패 예외를 처리합니다.
+	 *
+	 * @Valid가 붙은 DTO(요청 본문) 검증 실패는 MethodArgumentNotValidException이지만,
+	 * 쿼리 파라미터에 직접 붙인 @NotBlank, @Email 등의 검증 실패는
+	 * HandlerMethodValidationException(또는 ConstraintViolationException)으로 던져집니다.
+	 * 이 핸들러가 없으면 500으로 떨어지므로 400 + 필드 메시지로 변환합니다.
+	 * (예: 회원가입 이메일 중복 확인에서 잘못된 이메일 형식을 보낸 경우)
+	 */
+	@ExceptionHandler({HandlerMethodValidationException.class, ConstraintViolationException.class})
+	public Object handleParameterValidationException(
+		Exception exception,
+		HttpServletRequest request,
+		Model model
+	) {
+		ErrorCode errorCode = ErrorCode.INVALID_REQUEST;
+		String message = resolveParameterMessage(exception, errorCode);
+
+		if (isApiRequest(request)) {
+			return ResponseEntity
+				.status(errorCode.getStatus())
+				.body(ErrorResponse.of(errorCode, message, request.getRequestURI()));
+		}
+
+		addErrorAttributes(model, errorCode, message, request.getRequestURI());
+		return ERROR_VIEW;
+	}
+
+	/**
 	 * 별도로 처리하지 못한 예외를 마지막에 잡습니다.
 	 *
 	 * 예상하지 못한 예외의 상세 내용은 사용자에게 그대로 노출하지 않습니다.
@@ -104,6 +136,27 @@ public class GlobalExceptionHandler {
 		String accept = request.getHeader("Accept");
 
 		return uri.startsWith("/api") || (accept != null && accept.contains("application/json"));
+	}
+
+	/** 파라미터 검증 예외에서 첫 번째 위반 메시지를 꺼냅니다. 없으면 공통 메시지를 사용합니다. */
+	private String resolveParameterMessage(Exception exception, ErrorCode errorCode) {
+		if (exception instanceof HandlerMethodValidationException validationException) {
+			return validationException.getAllErrors()
+				.stream()
+				.map(MessageSourceResolvable::getDefaultMessage)
+				.filter(Objects::nonNull)
+				.findFirst()
+				.orElse(errorCode.getMessage());
+		}
+		if (exception instanceof ConstraintViolationException violationException) {
+			return violationException.getConstraintViolations()
+				.stream()
+				.map(ConstraintViolation::getMessage)
+				.filter(Objects::nonNull)
+				.findFirst()
+				.orElse(errorCode.getMessage());
+		}
+		return errorCode.getMessage();
 	}
 
 	private void addErrorAttributes(Model model, ErrorCode errorCode, String message, String path) {

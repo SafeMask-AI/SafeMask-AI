@@ -56,6 +56,53 @@ public class Member {
 	protected Member() {
 	}
 
+	/**
+	 * 회원가입 시 새 Member를 생성합니다.
+	 *
+	 * 비밀번호는 반드시 인코딩(BCrypt)된 값을 전달해야 합니다.
+	 * 평문 비밀번호가 DB에 저장되는 사고를 막기 위해 서비스 계층에서
+	 * PasswordEncoder.encode()를 거친 값만 넘기도록 합니다.
+	 * role은 @PrePersist에서 기본값 USER로 채워집니다.
+	 */
+	public static Member create(String loginId, String encodedPassword, String name, String email,
+		String department) {
+		Member member = new Member();
+		member.loginId = loginId;
+		member.password = encodedPassword;
+		member.name = name;
+		member.email = email;
+		member.department = department;
+		return member;
+	}
+
+	public Long getId() {
+		return id;
+	}
+
+	public String getLoginId() {
+		return loginId;
+	}
+
+	public String getPassword() {
+		return password;
+	}
+
+	public String getName() {
+		return name;
+	}
+
+	public String getEmail() {
+		return email;
+	}
+
+	public String getDepartment() {
+		return department;
+	}
+
+	public MemberRole getRole() {
+		return role;
+	}
+
 	@PrePersist
 	void prePersist() {
 		LocalDateTime now = LocalDateTime.now();
