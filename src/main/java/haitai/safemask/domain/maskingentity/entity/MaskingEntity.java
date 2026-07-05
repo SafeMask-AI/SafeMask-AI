@@ -16,6 +16,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import lombok.Getter;
 
 /**
  * 한 번의 AI 실행(AiRun)에서 탐지된 민감정보 1건에 대한 감사(audit) 기록입니다.
@@ -27,6 +28,7 @@ import java.time.LocalDateTime;
  * 원복이 끝난 결과는 ChatMessage.originalContent에 저장되므로
  * 세션이 끝나면 원본 매핑은 어디에도 남지 않습니다. (개인정보 최소보관)
  */
+@Getter
 @Entity
 @Table(name = "MASKING_ENTITY")
 public class MaskingEntity {
@@ -46,7 +48,7 @@ public class MaskingEntity {
 	@Column(nullable = false, length = 30)
 	private MaskingType type;
 
-	/** 원본값을 대체한 마스킹 토큰 (예: {{NAME_1}}) — GPT로 나가는 값 */
+	/** 원본값을 대체한 마스킹 토큰 (예: [PERSON_001]) — GPT로 나가는 값 */
 	@Column(nullable = false, length = 100)
 	private String maskedToken;
 
@@ -62,6 +64,17 @@ public class MaskingEntity {
 	private LocalDateTime createdAt;
 
 	protected MaskingEntity() {
+	}
+
+	public static MaskingEntity create(AiRun aiRun, MaskingType type, String maskedToken,
+		Integer startIndex, Integer endIndex) {
+		MaskingEntity maskingEntity = new MaskingEntity();
+		maskingEntity.aiRun = aiRun;
+		maskingEntity.type = type;
+		maskingEntity.maskedToken = maskedToken;
+		maskingEntity.startIndex = startIndex;
+		maskingEntity.endIndex = endIndex;
+		return maskingEntity;
 	}
 
 	@PrePersist

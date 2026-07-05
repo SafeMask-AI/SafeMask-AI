@@ -17,11 +17,13 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import lombok.Getter;
 
 /**
  * 채팅방 단위 정보입니다.
  * 채팅 목록 표시와 Redis 토큰 매핑을 묶는 기준으로 사용합니다.
  */
+@Getter
 @Entity
 @Table(name = "CHATROOM")
 public class ChatRoom {
@@ -49,6 +51,23 @@ public class ChatRoom {
 	private LocalDateTime updatedAt;
 
 	protected ChatRoom() {
+	}
+
+	public static ChatRoom create(Member member, String title) {
+		ChatRoom chatRoom = new ChatRoom();
+		chatRoom.member = member;
+		chatRoom.title = title;
+		chatRoom.status = ChatRoomStatus.ACTIVE;
+		return chatRoom;
+	}
+
+	public void touch() {
+		this.updatedAt = LocalDateTime.now();
+	}
+
+	public void archive() {
+		this.status = ChatRoomStatus.ARCHIVED;
+		this.updatedAt = LocalDateTime.now();
 	}
 
 	@PrePersist

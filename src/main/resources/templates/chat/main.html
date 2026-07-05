@@ -7,10 +7,6 @@
 	<link rel="stylesheet" th:href="@{/css/chat.css}">
 </head>
 <body>
-<!--
-	채팅 메인 화면입니다. 현재는 디자인(레이아웃)만 구현된 상태이며,
-	새 채팅 / 대화 목록 / 메시지 전송 기능은 추후 API와 연결합니다.
--->
 <div class="chat-layout">
 
 	<!-- ==================== 좌측 사이드바 ==================== -->
@@ -24,12 +20,7 @@
 		<button type="button" class="new-chat-button">+ 새 채팅</button>
 
 		<p class="recent-label">최근 대화</p>
-		<!-- TODO: 채팅방 목록 API 연결 전까지는 디자인 확인용 더미 항목입니다. -->
-		<ul class="recent-list">
-			<li class="active">직원 명단 표로 정리</li>
-			<li>느린 SELECT 쿼리 튜닝</li>
-			<li>결제 서버 장애 로그 분석</li>
-			<li>거래처 안내 메일 다듬기</li>
+		<ul class="recent-list" id="recentList">
 		</ul>
 
 		<!-- 하단 사용자 정보: chat.js가 로그인 시 저장한 값으로 채웁니다. -->
@@ -53,7 +44,7 @@
 		</header>
 
 		<!-- 온보딩(대화 시작 전 빈 화면) -->
-		<section class="onboarding">
+		<section class="onboarding" id="onboarding">
 			<img class="center-logo" th:src="@{/images/haitai-logo.jpg}" alt="해태 로고">
 
 			<h1>무엇을 도와드릴까요?</h1>
@@ -78,40 +69,52 @@
 				</div>
 			</div>
 
-			<!-- 예시로 시작하기 -->
-			<div class="example-section">
-				<p class="example-label">예시로 시작하기</p>
-				<div class="example-grid">
-					<div class="example-card">
-						<p class="name">직원 명단 정리</p>
-						<p class="desc">담당자·연락처·사번 마스킹 후 표 정리</p>
-					</div>
-					<div class="example-card">
-						<p class="name">SQL 성능 분석</p>
-						<p class="desc">테이블·IP·계정 마스킹 후 쿼리 진단</p>
-					</div>
-					<div class="example-card">
-						<p class="name">운영 로그 장애 분석</p>
-						<p class="desc">서버·IP·계정 마스킹 후 원인 정리</p>
-					</div>
-					<div class="example-card">
-						<p class="name">메일 문장 개선</p>
-						<p class="desc">이름·연락처 마스킹 후 정중하게</p>
-					</div>
+		</section>
+
+		<section class="message-list" id="messageList" aria-live="polite"></section>
+		<div class="drop-overlay" id="dropOverlay">파일을 놓으면 대화에 첨부됩니다.</div>
+
+		<section class="masking-preview" id="maskingPreview" hidden>
+			<div class="preview-header">
+				<div>
+					<p class="preview-title">마스킹 확인</p>
+					<p class="preview-sub" id="previewSummary"></p>
 				</div>
+				<button type="button" class="preview-close" id="previewCancelButton" title="취소">&times;</button>
+			</div>
+			<pre class="preview-text" id="previewText"></pre>
+			<div class="manual-mask">
+				<input type="text" id="manualMaskValue" placeholder="추가로 가릴 단어를 입력하세요">
+				<select id="manualMaskType">
+					<option value="CUSTOM">사용자 지정</option>
+					<option value="NAME">이름</option>
+					<option value="PHONE">전화번호</option>
+					<option value="EMAIL">이메일</option>
+					<option value="ADDRESS">주소</option>
+					<option value="EMPLOYEE_NO">사번</option>
+					<option value="ACCOUNT_NUMBER">계좌번호</option>
+				</select>
+				<button type="button" class="secondary-button" id="manualMaskAddButton">추가</button>
+			</div>
+			<ul class="manual-mask-list" id="manualMaskList"></ul>
+			<div class="preview-actions">
+				<button type="button" class="secondary-button" id="previewEditButton">다시 수정</button>
+				<button type="button" class="primary-button" id="previewApproveButton">이대로 전송</button>
 			</div>
 		</section>
 
-		<!-- 하단 입력바 (기능 미연결, 디자인만) -->
 		<footer class="composer">
+			<ul class="attachment-list" id="attachmentList"></ul>
 			<div class="composer-box">
-				<button type="button" class="attach-button" title="파일 첨부">&#128206;</button>
-				<input type="text" placeholder="메시지를 입력하거나 민감정보가 포함된 자료를 붙여넣으세요...">
-				<button type="button" class="send-button" title="전송">&#8593;</button>
+				<button type="button" class="attach-button" id="attachButton" title="파일 첨부">&#128206;</button>
+				<input type="file" id="fileInput" multiple hidden
+					   accept=".txt,.csv,.xlsx,.docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/csv">
+				<textarea id="messageInput" rows="1" placeholder="메시지를 입력하거나 민감정보가 포함된 자료를 붙여넣으세요..."></textarea>
+				<button type="button" class="send-button" id="sendButton" title="전송">&#8593;</button>
 			</div>
 			<div class="composer-hint">
 				<span class="safe-note">전송 전 민감정보를 자동 검사하고, 마스킹 결과를 확인·승인하면 전송됩니다.</span>
-				<span class="shortcut"><strong>Shift + Enter</strong> 줄바꿈</span>
+				<span class="shortcut"><strong>Enter</strong> 전송 · <strong>Shift + Enter</strong> 줄바꿈</span>
 			</div>
 		</footer>
 	</main>

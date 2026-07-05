@@ -17,6 +17,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import lombok.Getter;
 
 /**
  * 채팅방 안의 개별 메시지입니다.
@@ -29,6 +30,7 @@ import java.time.LocalDateTime;
  * </ul>
  * 원본(originalContent)은 절대 사외(GPT API)로 나가지 않습니다.
  */
+@Getter
 @Entity
 @Table(name = "CHAT_MESSAGE")
 public class ChatMessage {
@@ -50,18 +52,28 @@ public class ChatMessage {
 
 	/** 원본 내용 (사내에만 보관, 사용자 화면에 표시되는 텍스트) */
 	@Lob
-	@Column(nullable = false)
+	@Column(nullable = false, columnDefinition = "LONGTEXT")
 	private String originalContent;
 
 	/** 마스킹된 내용 (GPT API로 실제 송수신된 텍스트) */
 	@Lob
-	@Column
+	@Column(columnDefinition = "LONGTEXT")
 	private String maskedContent;
 
 	@Column(nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
 	protected ChatMessage() {
+	}
+
+	public static ChatMessage create(ChatRoom chatRoom, MessageRole role, String originalContent,
+		String maskedContent) {
+		ChatMessage message = new ChatMessage();
+		message.chatRoom = chatRoom;
+		message.role = role;
+		message.originalContent = originalContent;
+		message.maskedContent = maskedContent;
+		return message;
 	}
 
 	@PrePersist

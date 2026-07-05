@@ -18,12 +18,14 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import lombok.Getter;
 
 /**
  * GPT API 호출 1회에 대한 실행 이력입니다.
  * "탐지 → 마스킹 미리보기 → 승인 → GPT 호출 → 원복"의 한 사이클을 추적하며,
  * 어떤 데이터가 언제 어떤 모델로 나갔는지에 대한 감사(audit) 근거가 됩니다.
  */
+@Getter
 @Entity
 @Table(name = "AI_RUN")
 public class AiRun {
@@ -79,6 +81,41 @@ public class AiRun {
 	private LocalDateTime updatedAt;
 
 	protected AiRun() {
+	}
+
+	public static AiRun createPreview(ChatRoom chatRoom) {
+		AiRun aiRun = new AiRun();
+		aiRun.chatRoom = chatRoom;
+		aiRun.status = AiRunStatus.PREVIEW;
+		return aiRun;
+	}
+
+	public static AiRun createApproved(ChatRoom chatRoom, ChatMessage requestMessage) {
+		AiRun aiRun = new AiRun();
+		aiRun.chatRoom = chatRoom;
+		aiRun.requestMessage = requestMessage;
+		aiRun.status = AiRunStatus.APPROVED;
+		return aiRun;
+	}
+
+	public void markCalling(String model) {
+		this.status = AiRunStatus.CALLING;
+		this.model = model;
+		this.requestedAt = LocalDateTime.now();
+	}
+
+	public void markCompleted(String model, Integer promptTokens, Integer completionTokens) {
+		this.status = AiRunStatus.COMPLETED;
+		this.model = model;
+		this.promptTokens = promptTokens;
+		this.completionTokens = completionTokens;
+		this.completedAt = LocalDateTime.now();
+	}
+
+	public void markFailed(String message) {
+		this.status = AiRunStatus.FAILED;
+		this.errorMessage = message == null ? null : message.substring(0, Math.min(message.length(), 1000));
+		this.completedAt = LocalDateTime.now();
 	}
 
 	@PrePersist

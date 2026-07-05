@@ -13,6 +13,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import lombok.Getter;
 
 /**
  * 민감정보를 탐지하는 규칙입니다.
@@ -22,6 +23,7 @@ import java.time.LocalDateTime;
  * <p>예: type=PHONE, pattern="01[016789]-?\\d{3,4}-?\\d{4}" 규칙이 매칭되면
  * 해당 구간이 MaskingEntity로 기록되고 토큰으로 치환됩니다.
  */
+@Getter
 @Entity
 @Table(name = "MASKING_RULE")
 public class MaskingRule {
@@ -63,6 +65,26 @@ public class MaskingRule {
 	private LocalDateTime updatedAt;
 
 	protected MaskingRule() {
+	}
+
+	/**
+	 * 새 마스킹 규칙을 생성합니다. (기본 시드 등록, 관리자 규칙 추가에서 사용)
+	 *
+	 * 정규식 유효성은 여기서 검증하지 않습니다.
+	 * 잘못된 패턴이 저장되더라도 마스킹 엔진이 컴파일 실패 규칙을 건너뛰고
+	 * 로그로 남기므로, 규칙 하나가 깨져도 전체 마스킹이 중단되지 않습니다.
+	 * (등록 화면에서의 사전 검증은 관리자 API 계층에서 담당)
+	 */
+	public static MaskingRule create(String name, MaskingType type, String pattern, Integer priority,
+		String description) {
+		MaskingRule rule = new MaskingRule();
+		rule.name = name;
+		rule.type = type;
+		rule.pattern = pattern;
+		rule.priority = priority;
+		rule.enabled = true;
+		rule.description = description;
+		return rule;
 	}
 
 	@PrePersist
