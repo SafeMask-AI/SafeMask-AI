@@ -38,6 +38,7 @@ logs/
 *.log.*
 
 ### Runtime / Temp ###
+data/files/
 tmp/
 temp/
 *.tmp

@@ -13,6 +13,8 @@ import haitai.safemask.domain.chatmessage.repository.ChatMessageRepository;
 import haitai.safemask.domain.chatroom.entity.ChatRoom;
 import haitai.safemask.domain.chatroom.enums.ChatRoomStatus;
 import haitai.safemask.domain.chatroom.repository.ChatRoomRepository;
+import haitai.safemask.domain.fileasset.service.FileAssetService;
+import haitai.safemask.domain.fileasset.service.GeneratedFileService;
 import haitai.safemask.domain.masking.dto.Detection;
 import haitai.safemask.domain.masking.dto.MaskingResult;
 import haitai.safemask.domain.masking.service.MaskingService;
@@ -58,6 +60,8 @@ public class ChatMessageService {
 	private final MaskingEntityRepository maskingEntityRepository;
 	private final MaskingService maskingService;
 	private final AttachmentTextExtractor attachmentTextExtractor;
+	private final GeneratedFileService generatedFileService;
+	private final FileAssetService fileAssetService;
 	private final ChatModel chatModel;
 	private final String modelName;
 
@@ -67,6 +71,8 @@ public class ChatMessageService {
 		MaskingEntityRepository maskingEntityRepository,
 		MaskingService maskingService,
 		AttachmentTextExtractor attachmentTextExtractor,
+		GeneratedFileService generatedFileService,
+		FileAssetService fileAssetService,
 		ChatModel chatModel,
 		@Value("${safemask.ai.model:gpt-4o-mini}") String modelName) {
 		this.chatRoomRepository = chatRoomRepository;
@@ -75,6 +81,8 @@ public class ChatMessageService {
 		this.maskingEntityRepository = maskingEntityRepository;
 		this.maskingService = maskingService;
 		this.attachmentTextExtractor = attachmentTextExtractor;
+		this.generatedFileService = generatedFileService;
+		this.fileAssetService = fileAssetService;
 		this.chatModel = chatModel;
 		this.modelName = modelName;
 	}
@@ -88,7 +96,7 @@ public class ChatMessageService {
 	 */
 	@Transactional
 	public ChatSendResponse send(Member member, ChatSendRequest request) {
-		return sendInternal(member, request, request.content(), false);
+		return sendInternal(member, request, request.content(), null);
 	}
 
 	@Transactional
@@ -98,12 +106,13 @@ public class ChatMessageService {
 		String processingContent = (baseContent + attachmentText).trim();
 		String displayContent = buildDisplayContent(baseContent, files);
 		return sendInternal(member, new ChatSendRequest(request.chatRoomId(), processingContent, request.approved(),
-			request.manualMasks()), displayContent, files != null && !files.isEmpty());
+			request.manualMasks()), displayContent, files);
 	}
 
 	private ChatSendResponse sendInternal(Member member, ChatSendRequest request, String displayContent,
-		boolean forcePreview) {
+		List<MultipartFile> files) {
 		validateRequest(request);
+		boolean forcePreview = files != null && !files.isEmpty();
 
 		ChatRoom chatRoom = resolveChatRoom(member, request, displayContent);
 		MaskingResult maskingResult = applyMasking(chatRoom.getId(), request);
@@ -118,6 +127,10 @@ public class ChatMessageService {
 				maskingResult.summary(), detections);
 		}
 
+		// 첨부 원본을 사내 스토리지에 보관한다. (미리보기 단계에서는 저장하지 않고,
+		// 사용자가 전송을 확정한 시점에만 보관 — AI 편집 요청 시 카피의 출발점이 된다)
+		fileAssetService.storeUploads(chatRoom, files);
+
 		ChatMessage userMessage = chatMessageRepository.save(
 			ChatMessage.create(chatRoom, MessageRole.USER, displayContent, maskingResult.maskedText()));
 		chatRoom.touch();
@@ -130,15 +143,21 @@ public class ChatMessageService {
 			String maskedAnswer = response.getResult().getOutput().getText();
 			String restoredAnswer = maskingService.restore(chatRoom.getId(), maskedAnswer);
 
+			// 원복이 끝난 응답에서 파일 블록을 실제 파일로 변환하고 안내 문구로 치환.
+			// (원복 후에 실행해야 파일에 토큰이 아닌 원본값이 담긴다)
+			GeneratedFileService.Outcome fileOutcome = generatedFileService.materialize(chatRoom, restoredAnswer);
+
+			// 화면·원본 보관용에는 치환된 본문을, GPT 컨텍스트용(maskedContent)에는
+			// 파일 블록이 남은 마스킹 응답을 그대로 저장해 모델이 자기 산출물을 기억하게 한다.
 			ChatMessage assistantMessage = chatMessageRepository.save(
-				ChatMessage.create(chatRoom, MessageRole.ASSISTANT, restoredAnswer, maskedAnswer));
+				ChatMessage.create(chatRoom, MessageRole.ASSISTANT, fileOutcome.displayContent(), maskedAnswer));
 
 			Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
 			aiRun.markCompleted(resolveModel(response), usage == null ? null : usage.getPromptTokens(),
 				usage == null ? null : usage.getCompletionTokens());
 
 			return ChatSendResponse.completed(chatRoom.getId(), userMessage.getId(), assistantMessage.getId(),
-				restoredAnswer, maskingResult.summary(), detections);
+				fileOutcome.displayContent(), maskingResult.summary(), detections, fileOutcome.files());
 		} catch (RuntimeException e) {
 			aiRun.markFailed(e.getMessage());
 			throw new CustomException(ErrorCode.AI_SERVICE_UNAVAILABLE, e);

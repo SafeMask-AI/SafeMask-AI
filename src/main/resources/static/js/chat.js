@@ -222,6 +222,9 @@
 
 		body.appendChild(author);
 		body.appendChild(bubble);
+		if (role === 'assistant') {
+			attachGeneratedFileCards(body, text);
+		}
 		row.appendChild(avatar);
 		row.appendChild(body);
 		messageList.appendChild(row);
@@ -323,6 +326,9 @@
 				await sleep(delay);
 			}
 		}
+		if (role === 'assistant') {
+			attachGeneratedFileCards(body, text);
+		}
 		messageList.scrollTop = messageList.scrollHeight;
 	}
 
@@ -330,6 +336,84 @@
 		return new Promise(function (resolve) {
 			window.setTimeout(resolve, ms);
 		});
+	}
+
+	// 서버(GeneratedFileService)가 응답 본문에 남기는 파일 안내 문구 형식.
+	// 이 패턴으로 과거 대화를 다시 열어도 다운로드 버튼을 복원할 수 있다.
+	const GENERATED_FILE_PATTERN = /📎 생성된 파일: (.+?) \(파일번호 (\d+)\)/g;
+
+	/** 메시지 본문에서 생성 파일 안내를 찾아 다운로드 카드를 붙인다. (새 응답·히스토리 공용) */
+	function attachGeneratedFileCards(body, text) {
+		const matches = Array.from((text || '').matchAll(GENERATED_FILE_PATTERN));
+		if (matches.length === 0) {
+			return;
+		}
+
+		const wrap = document.createElement('div');
+		wrap.className = 'generated-files';
+		matches.forEach(function (match) {
+			wrap.appendChild(createFileDownloadCard(Number(match[2]), match[1]));
+		});
+		body.appendChild(wrap);
+	}
+
+	function createFileDownloadCard(fileId, fileName) {
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'file-download-card';
+
+		const icon = document.createElement('span');
+		icon.className = 'file-icon';
+		icon.textContent = '📄';
+
+		const nameSpan = document.createElement('span');
+		nameSpan.className = 'file-name';
+		nameSpan.textContent = fileName;
+
+		const action = document.createElement('span');
+		action.className = 'file-action';
+		action.textContent = '다운로드';
+
+		button.appendChild(icon);
+		button.appendChild(nameSpan);
+		button.appendChild(action);
+		button.addEventListener('click', function () {
+			downloadGeneratedFile(fileId, fileName, button);
+		});
+		return button;
+	}
+
+	/**
+	 * 생성 파일을 내려받는다.
+	 * 다운로드 API도 JWT 인증이 필요해 <a href>로는 받을 수 없고,
+	 * Authorization 헤더를 실은 fetch로 받아 Blob 링크로 저장한다.
+	 */
+	async function downloadGeneratedFile(fileId, fileName, button) {
+		try {
+			button.disabled = true;
+			const response = await authorizedFetch(`/api/files/${fileId}/download`);
+			if (response.status === 401) {
+				forceLogout();
+				return;
+			}
+			if (!response.ok) {
+				throw new Error('파일을 내려받지 못했습니다. (만료되었거나 삭제된 파일일 수 있습니다)');
+			}
+
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = fileName;
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			URL.revokeObjectURL(url);
+		} catch (error) {
+			appendMessage('system', error.message || '파일을 내려받지 못했습니다.');
+		} finally {
+			button.disabled = false;
+		}
 	}
 
 	function showPreview(data) {

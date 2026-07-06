@@ -6,9 +6,11 @@ import haitai.safemask.domain.maskingentity.enums.MaskingType;
 import haitai.safemask.domain.maskingrule.entity.MaskingRule;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -81,8 +83,42 @@ public class MaskingEngine {
 			}
 		}
 
+		propagateDetectedValues(text, detections);
+
 		detections.sort(Comparator.comparingInt(Detection::startIndex));
 		return new MaskingResult(text, replaceWithTokens(text, detections), List.copyOf(detections));
+	}
+
+	/**
+	 * 전파 마스킹: 규칙이 한 번 잡은 값이 텍스트의 다른 위치에 다시 등장하면
+	 * (규칙이 그 위치를 못 잡았더라도) 같은 토큰으로 함께 마스킹합니다.
+	 *
+	 * <p>예: 엑셀 이름 컬럼에서 "이서연"이 잡히면, 같은 텍스트의
+	 * "이서연의 주민번호는..." 문장 속 "이서연"도 마스킹됩니다.
+	 * 이미 민감정보로 확정된 값의 리터럴 재등장만 치환하므로 새로운 오탐을 만들지 않고,
+	 * 한 곳이라도 잡히면 전체가 가려져 부분 노출을 막습니다.
+	 */
+	private void propagateDetectedValues(String text, List<Detection> detections) {
+		List<Detection> seeds = List.copyOf(detections);
+		Set<String> propagated = new HashSet<>();
+
+		for (Detection seed : seeds) {
+			// 두 글자 미만 값은 우연히 일치할 확률이 높아 전파하지 않음
+			if (seed.originalValue().length() < 2
+				|| !propagated.add(seed.type().name() + ":" + seed.originalValue())) {
+				continue;
+			}
+
+			Matcher matcher = Pattern.compile(Pattern.quote(seed.originalValue())).matcher(text);
+			while (matcher.find()) {
+				if (overlapsAccepted(detections, matcher.start(), matcher.end())) {
+					continue;
+				}
+				// 같은 (type, value)이므로 시드와 같은 토큰을 재사용 (토큰 발급기 호출 불필요)
+				detections.add(new Detection(seed.type(), seed.originalValue(), seed.token(),
+					matcher.start(), matcher.end()));
+			}
+		}
 	}
 
 	/**

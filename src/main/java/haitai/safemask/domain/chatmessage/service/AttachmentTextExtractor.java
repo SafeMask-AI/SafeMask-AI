@@ -60,21 +60,35 @@ public class AttachmentTextExtractor {
 		}
 	}
 
+	/**
+	 * xlsx에서 텍스트를 추출합니다.
+	 *
+	 * <p>반드시 2패스로 처리해야 합니다: xlsx의 문자열 셀은 실제 값이
+	 * xl/sharedStrings.xml에 모여 있고 시트에는 인덱스만 있는데,
+	 * zip 안에서 sharedStrings가 시트보다 뒤에 오는 파일도 있습니다(생성 도구마다 다름).
+	 * 스트림 순서대로 시트를 바로 변환하면 그런 파일에서 문자열 셀이 전부 유실되어
+	 * 민감정보가 마스킹 없이 누락되므로, 1패스에서 시트 XML은 보관만 하고
+	 * sharedStrings 확보가 끝난 뒤에 텍스트로 변환합니다.
+	 */
 	private String extractXlsx(byte[] bytes) throws IOException {
 		List<String> sharedStrings = new ArrayList<>();
-		StringBuilder sheets = new StringBuilder();
+		List<String> sheetXmls = new ArrayList<>();
 
 		try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
 			ZipEntry entry;
 			while ((entry = zip.getNextEntry()) != null) {
 				String name = entry.getName();
-				String xml = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
 				if ("xl/sharedStrings.xml".equals(name)) {
-					sharedStrings = extractXmlTextItems(xml);
+					sharedStrings = extractXmlTextItems(new String(zip.readAllBytes(), StandardCharsets.UTF_8));
 				} else if (name.startsWith("xl/worksheets/") && name.endsWith(".xml")) {
-					sheets.append(extractSheetText(xml, sharedStrings)).append("\n");
+					sheetXmls.add(new String(zip.readAllBytes(), StandardCharsets.UTF_8));
 				}
 			}
+		}
+
+		StringBuilder sheets = new StringBuilder();
+		for (String sheetXml : sheetXmls) {
+			sheets.append(extractSheetText(sheetXml, sharedStrings)).append("\n");
 		}
 		return sheets.toString().trim();
 	}
@@ -92,25 +106,38 @@ public class AttachmentTextExtractor {
 		return "";
 	}
 
+	/**
+	 * 시트 XML을 "셀은 탭, 행은 줄바꿈"으로 구분된 텍스트로 변환합니다.
+	 * 행 구분을 살려야 GPT가 표 구조를 이해할 수 있고,
+	 * 마스킹 규칙도 셀 경계(탭/줄바꿈)를 기준으로 값을 탐지할 수 있습니다.
+	 */
 	private String extractSheetText(String xml, List<String> sharedStrings) {
 		StringBuilder result = new StringBuilder();
-		String[] cells = xml.split("<c ");
-		for (String cell : cells) {
-			if (!cell.contains("</c>")) {
+		String[] rows = xml.split("<row ");
+		for (String row : rows) {
+			if (!row.contains("</c>")) {
 				continue;
 			}
-			String value = extractBetween(cell, "<v>", "</v>");
-			String inline = extractBetween(cell, "<t>", "</t>");
-			if (cell.contains("t=\"s\"") && value != null) {
-				int index = Integer.parseInt(value.trim());
-				if (index >= 0 && index < sharedStrings.size()) {
-					result.append(sharedStrings.get(index)).append('\t');
+			StringBuilder line = new StringBuilder();
+			String[] cells = row.split("<c ");
+			for (String cell : cells) {
+				if (!cell.contains("</c>")) {
+					continue;
 				}
-			} else if (inline != null) {
-				result.append(unescapeXml(inline)).append('\t');
-			} else if (value != null) {
-				result.append(value.trim()).append('\t');
+				String value = extractBetween(cell, "<v>", "</v>");
+				String inline = extractBetween(cell, "<t>", "</t>");
+				if (cell.contains("t=\"s\"") && value != null) {
+					int index = Integer.parseInt(value.trim());
+					if (index >= 0 && index < sharedStrings.size()) {
+						line.append(sharedStrings.get(index)).append('\t');
+					}
+				} else if (inline != null) {
+					line.append(unescapeXml(inline)).append('\t');
+				} else if (value != null) {
+					line.append(value.trim()).append('\t');
+				}
 			}
+			result.append(line.toString().stripTrailing()).append('\n');
 		}
 		return result.toString();
 	}
