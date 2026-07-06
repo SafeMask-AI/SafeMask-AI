@@ -23,7 +23,7 @@ import java.time.LocalDateTime;
  * 로그아웃 시에는 이 레코드를 삭제해 토큰을 즉시 무효화합니다.
  */
 @Entity
-@Table(name = "REFRESH_TOKEN")
+@Table(name = "MASK_REFRESH_TOKEN")
 public class RefreshToken {
 
 	@Id

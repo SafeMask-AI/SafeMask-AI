@@ -23,7 +23,7 @@ import java.time.LocalDateTime;
  * 파일 원본은 사내 스토리지에만 저장되며, 텍스트 추출 → 마스킹을 거친 내용만 GPT로 전달됩니다.
  */
 @Entity
-@Table(name = "FILE_ASSET")
+@Table(name = "MASK_FILE_ASSET")
 public class FileAsset {
 
 	@Id

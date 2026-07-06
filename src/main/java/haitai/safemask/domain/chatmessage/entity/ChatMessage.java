@@ -32,7 +32,7 @@ import lombok.Getter;
  */
 @Getter
 @Entity
-@Table(name = "CHAT_MESSAGE")
+@Table(name = "MASK_CHAT_MESSAGE")
 public class ChatMessage {
 
 	@Id

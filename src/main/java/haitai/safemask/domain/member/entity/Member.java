@@ -19,7 +19,7 @@ import java.time.LocalDateTime;
  * 로그인 아이디(사번), 비밀번호, 이름, 이메일, 부서, 권한을 관리합니다.
  */
 @Entity
-@Table(name = "MEMBER")
+@Table(name = "MASK_MEMBER")
 public class Member {
 
 	@Id

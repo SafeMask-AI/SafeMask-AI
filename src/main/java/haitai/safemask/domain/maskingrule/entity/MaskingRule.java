@@ -25,7 +25,7 @@ import lombok.Getter;
  */
 @Getter
 @Entity
-@Table(name = "MASKING_RULE")
+@Table(name = "MASK_MASKING_RULE")
 public class MaskingRule {
 
 	@Id

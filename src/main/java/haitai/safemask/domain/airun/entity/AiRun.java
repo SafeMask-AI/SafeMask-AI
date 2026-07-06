@@ -27,7 +27,7 @@ import lombok.Getter;
  */
 @Getter
 @Entity
-@Table(name = "AI_RUN")
+@Table(name = "MASK_AI_RUN")
 public class AiRun {
 
 	@Id

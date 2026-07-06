@@ -30,7 +30,7 @@ import lombok.Getter;
  */
 @Getter
 @Entity
-@Table(name = "MASKING_ENTITY")
+@Table(name = "MASK_MASKING_ENTITY")
 public class MaskingEntity {
 
 	@Id

@@ -25,7 +25,7 @@ import lombok.Getter;
  */
 @Getter
 @Entity
-@Table(name = "CHATROOM")
+@Table(name = "MASK_CHATROOM")
 public class ChatRoom {
 
 	@Id
