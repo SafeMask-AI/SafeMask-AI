@@ -13,17 +13,13 @@
 	let attachedFiles = [];
 	let sending = false;
 
-	const maskingMessages = [
-		'입력 내용을 확인하고 있습니다...',
-		'민감정보 패턴을 검사하고 있습니다...',
-		'토큰 치환이 필요한 항목을 찾고 있습니다...'
-	];
-	const aiMessages = [
-		'보안 처리된 문맥을 구성하고 있습니다...',
-		'이전 대화 맥락을 함께 정리하고 있습니다...',
-		'AI 답변을 생성하고 있습니다...',
-		'토큰 형식을 유지하며 응답을 검토하고 있습니다...'
-	];
+	const SUPPORTED_FILE_TYPES = {
+		txt: { label: 'TXT', kind: 'text' },
+		csv: { label: 'CSV', kind: 'csv' },
+		xlsx: { label: 'XLSX', kind: 'excel' },
+		docx: { label: 'DOCX', kind: 'word' },
+		pdf: { label: 'PDF', kind: 'pdf' }
+	};
 
 	const name = localStorage.getItem('memberName') || '사용자';
 	const department = localStorage.getItem('memberDepartment') || '';
@@ -40,6 +36,7 @@
 	const attachButton = document.getElementById('attachButton');
 	const fileInput = document.getElementById('fileInput');
 	const attachmentList = document.getElementById('attachmentList');
+	const attachmentNotice = document.getElementById('attachmentNotice');
 	const maskingPreview = document.getElementById('maskingPreview');
 	const previewSummary = document.getElementById('previewSummary');
 	const previewText = document.getElementById('previewText');
@@ -100,9 +97,16 @@
 		sendMessage(true);
 	});
 
-	previewCancelButton.addEventListener('click', hidePreview);
+	previewCancelButton.addEventListener('click', function () {
+		clearPreviewState({ clearAttachments: true });
+	});
 	previewEditButton.addEventListener('click', function () {
-		hidePreview();
+		const content = pendingPreview ? pendingPreview.content : '';
+		clearPreviewState({ restoreAttachments: true });
+		if (content && !messageInput.value.trim()) {
+			messageInput.value = content;
+			resizeComposer();
+		}
 		messageInput.focus();
 	});
 
@@ -126,7 +130,7 @@
 		}
 
 		if (!approved) {
-			hidePreview();
+			clearPreviewState({ restoreAttachments: true });
 		} else {
 			maskingPreview.hidden = true;
 			attachmentList.hidden = true;
@@ -139,12 +143,7 @@
 			resizeComposer();
 		}
 
-		const statusRow = appendStatusMessage(approved ? aiMessages[0] : maskingMessages[0]);
-		let statusTicker = startStatusTicker(statusRow, approved ? aiMessages : maskingMessages, 900);
-		const generationTimer = approved ? null : window.setTimeout(function () {
-			stopStatusTicker(statusTicker);
-			statusTicker = startStatusTicker(statusRow, aiMessages, 1200);
-		}, 1600);
+		const progress = appendProgressMessage(buildProgressSteps(approved, attachedFiles.length > 0));
 
 		try {
 			const response = await sendChatRequest(content, approved);
@@ -164,11 +163,8 @@
 			loadRooms();
 
 			if (data.previewRequired) {
-				if (generationTimer) {
-					window.clearTimeout(generationTimer);
-				}
-				stopStatusTicker(statusTicker);
-				removeMessageRow(statusRow);
+				progress.stop();
+				removeMessageRow(progress.row);
 				pendingPreview = { content: content, hasFiles: attachedFiles.length > 0 };
 				manualMasks = [];
 				showPreview(data);
@@ -180,19 +176,12 @@
 			manualMasks = [];
 			attachedFiles = [];
 			renderAttachments();
-			if (generationTimer) {
-				window.clearTimeout(generationTimer);
-			}
-			stopStatusTicker(statusTicker);
-			updateStatusMessage(statusRow, '답변을 화면에 정리하고 있습니다...');
+			progress.complete();
 			await appendTypingMessage('assistant', data.assistantContent || '');
-			removeMessageRow(statusRow);
+			removeMessageRow(progress.row);
 		} catch (error) {
-			if (generationTimer) {
-				window.clearTimeout(generationTimer);
-			}
-			stopStatusTicker(statusTicker);
-			removeMessageRow(statusRow);
+			progress.stop();
+			removeMessageRow(progress.row);
 			appendMessage('system', resolveRequestErrorMessage(error));
 		} finally {
 			setSending(false);
@@ -287,6 +276,107 @@
 		}
 	}
 
+	function appendProgressMessage(steps) {
+		setChatting(true);
+
+		const row = document.createElement('div');
+		row.className = 'message-row assistant status progress-status';
+
+		const avatar = document.createElement('div');
+		avatar.className = 'message-avatar';
+		avatar.textContent = 'AI';
+
+		const body = document.createElement('div');
+		body.className = 'message-body';
+
+		const author = document.createElement('div');
+		author.className = 'message-author';
+		author.textContent = '해태 사내 AI';
+
+		const bubble = document.createElement('div');
+		bubble.className = 'message-bubble status-bubble progress-bubble';
+
+		const stepList = document.createElement('ol');
+		stepList.className = 'progress-steps';
+		const items = steps.map(function (step, index) {
+			const item = document.createElement('li');
+			item.className = 'progress-step';
+
+			const number = document.createElement('span');
+			number.className = 'step-number';
+			number.textContent = String(index + 1);
+
+			const label = document.createElement('span');
+			label.className = 'step-label';
+			label.textContent = step;
+
+			item.appendChild(number);
+			item.appendChild(label);
+			stepList.appendChild(item);
+			return item;
+		});
+
+		bubble.appendChild(stepList);
+		body.appendChild(author);
+		body.appendChild(bubble);
+		row.appendChild(avatar);
+		row.appendChild(body);
+		messageList.appendChild(row);
+		messageList.scrollTop = messageList.scrollHeight;
+
+		let index = 0;
+		let timer = null;
+
+		function render() {
+			items.forEach(function (item, itemIndex) {
+				item.classList.toggle('done', itemIndex < index);
+				item.classList.toggle('current', itemIndex === index);
+			});
+		}
+
+		function schedule() {
+			timer = window.setTimeout(function () {
+				if (index < items.length - 1) {
+					index += 1;
+					render();
+					schedule();
+				}
+			}, index === 0 ? 900 : 1500);
+		}
+
+		render();
+		schedule();
+
+		return {
+			row: row,
+			stop: function () {
+				if (timer) {
+					window.clearTimeout(timer);
+				}
+			},
+			complete: function () {
+				if (timer) {
+					window.clearTimeout(timer);
+				}
+				index = items.length;
+				items.forEach(function (item) {
+					item.classList.add('done');
+					item.classList.remove('current');
+				});
+			}
+		};
+	}
+
+	function buildProgressSteps(approved, hasFiles) {
+		if (approved) {
+			return ['승인 내용 적용', '보안 문맥 구성', 'AI 답변 생성', '결과 정리'];
+		}
+		if (hasFiles) {
+			return ['파일 내용 확인', '민감정보 탐지', '미리보기 준비', '응답 준비'];
+		}
+		return ['입력 내용 확인', '민감정보 탐지', '미리보기 준비', '응답 준비'];
+	}
+
 	function removeMessageRow(row) {
 		if (row && row.parentNode) {
 			row.parentNode.removeChild(row);
@@ -318,12 +408,14 @@
 		row.appendChild(body);
 		messageList.appendChild(row);
 
-		const delay = text.length > 600 ? 4 : 12;
+		const baseDelay = text.length > 900 ? 8 : text.length > 450 ? 14 : 20;
 		for (let i = 0; i < text.length; i += 1) {
-			bubble.textContent += text.charAt(i);
-			if (i % 3 === 0) {
+			const char = text.charAt(i);
+			bubble.textContent += char;
+			const punctuationPause = /[.!?。！？\n]/.test(char);
+			if (punctuationPause || (i > 0 && i % 8 === 0)) {
 				messageList.scrollTop = messageList.scrollHeight;
-				await sleep(delay);
+				await sleep(punctuationPause ? baseDelay * 5 : baseDelay);
 			}
 		}
 		if (role === 'assistant') {
@@ -459,14 +551,21 @@
 		return lines.join('\n');
 	}
 
-	function hidePreview() {
+	function clearPreviewState(options) {
+		const clearAttachments = Boolean(options && options.clearAttachments);
+		const restoreAttachments = !options || options.restoreAttachments !== false;
 		maskingPreview.hidden = true;
 		previewSummary.textContent = '';
 		previewText.textContent = '';
 		manualMaskValue.value = '';
+		pendingPreview = null;
 		manualMasks = [];
-		attachmentList.hidden = false;
+		if (clearAttachments) {
+			attachedFiles = [];
+		}
+		attachmentList.hidden = !restoreAttachments || attachedFiles.length === 0;
 		renderManualMasks();
+		renderAttachments();
 	}
 
 	function sendChatRequest(content, approved) {
@@ -507,16 +606,23 @@
 	}
 
 	function addFiles(files) {
-		const allowed = ['txt', 'csv', 'xlsx', 'docx', 'pdf'];
+		const rejected = [];
 		files.forEach(function (file) {
-			const extension = file.name.split('.').pop().toLowerCase();
-			if (!allowed.includes(extension)) {
-				appendMessage('system', `${file.name} 파일 형식은 아직 지원하지 않습니다.`);
+			const type = getFileType(file.name);
+			if (!type) {
+				rejected.push(file.name);
 				return;
 			}
 			attachedFiles.push(file);
 		});
 		renderAttachments();
+		if (rejected.length > 0) {
+			const names = rejected.slice(0, 2).join(', ');
+			const suffix = rejected.length > 2 ? ` 외 ${rejected.length - 2}개` : '';
+			showAttachmentNotice(`${names}${suffix} 파일은 첨부할 수 없습니다.`, 'error');
+		} else if (files.length > 0) {
+			hideAttachmentNotice();
+		}
 	}
 
 	function renderAttachments() {
@@ -524,25 +630,58 @@
 		attachmentList.hidden = attachedFiles.length === 0;
 		attachedFiles.forEach(function (file, index) {
 			const item = document.createElement('li');
+			const type = getFileType(file.name);
+			item.className = `attachment-card ${type.kind}`;
+
+			const badge = document.createElement('span');
+			badge.className = `file-type-badge ${type.kind}`;
+			badge.textContent = type.label;
+
+			const meta = document.createElement('span');
+			meta.className = 'file-meta';
+
 			const nameSpan = document.createElement('span');
 			nameSpan.className = 'file-name';
 			nameSpan.textContent = file.name;
+
 			const sizeSpan = document.createElement('span');
 			sizeSpan.className = 'file-size';
 			sizeSpan.textContent = formatFileSize(file.size);
+
 			const removeButton = document.createElement('button');
 			removeButton.type = 'button';
 			removeButton.textContent = '×';
+			removeButton.title = '첨부 제거';
 			removeButton.addEventListener('click', function () {
 				attachedFiles.splice(index, 1);
 				renderAttachments();
 			});
 
-			item.appendChild(nameSpan);
-			item.appendChild(sizeSpan);
+			meta.appendChild(nameSpan);
+			meta.appendChild(sizeSpan);
+			item.appendChild(badge);
+			item.appendChild(meta);
 			item.appendChild(removeButton);
 			attachmentList.appendChild(item);
 		});
+	}
+
+	function getFileType(fileName) {
+		const extension = (fileName.split('.').pop() || '').toLowerCase();
+		return SUPPORTED_FILE_TYPES[extension] || null;
+	}
+
+	function showAttachmentNotice(message, tone) {
+		attachmentNotice.textContent = message;
+		attachmentNotice.className = `attachment-notice ${tone || 'info'}`;
+		attachmentNotice.hidden = false;
+		window.clearTimeout(showAttachmentNotice.timer);
+		showAttachmentNotice.timer = window.setTimeout(hideAttachmentNotice, 3600);
+	}
+
+	function hideAttachmentNotice() {
+		attachmentNotice.hidden = true;
+		attachmentNotice.textContent = '';
 	}
 
 	function buildUserDisplayText(content) {
@@ -642,7 +781,8 @@
 		if (sending) {
 			return;
 		}
-		hidePreview();
+		clearPreviewState({ clearAttachments: true });
+		hideAttachmentNotice();
 		currentChatRoomId = chatRoomId;
 		document.querySelector('.main-header .title').textContent = title;
 		renderRooms(rooms);
@@ -737,12 +877,12 @@
 		attachedFiles = [];
 		messageList.innerHTML = '';
 		setChatting(false);
-		hidePreview();
+		clearPreviewState({ clearAttachments: true });
+		hideAttachmentNotice();
 		messageInput.value = '';
 		resizeComposer();
 		document.querySelector('.main-header .title').textContent = '새 채팅';
 		renderRooms(rooms);
-		renderAttachments();
 	}
 
 	function setSending(value) {
