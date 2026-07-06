@@ -45,11 +45,18 @@ server:
 # mapping-ttl: 원본값↔토큰 매핑을 Redis에 보관하는 시간.
 #   방에서 마스킹/원복 활동이 있을 때마다 갱신되며, 만료되면 해당 방의
 #   기존 토큰은 원복할 수 없게 됩니다. (원본 민감정보 최소보관 정책)
+# storage.base-path: 업로드·AI 생성 파일이 저장되는 사내 스토리지 경로.
+#   생성 파일에는 원복된 민감정보가 들어가므로 웹에서 직접 접근할 수 없는
+#   경로여야 하며, 다운로드는 인증된 API를 통해서만 이뤄집니다.
+#   기본값은 프로젝트 내부가 아니라 OS 임시 디렉터리입니다. 운영 환경은
+#   FILE_STORAGE_PATH로 프로젝트 밖의 전용 보안 저장소를 지정하세요.
 safemask:
   ai:
     model: ${SAFEMASK_AI_MODEL:gpt-4o-mini}
   masking:
     mapping-ttl: ${MASKING_MAPPING_TTL:24h}
+  storage:
+    base-path: ${FILE_STORAGE_PATH:${java.io.tmpdir}/safemask/files}
 
 # JWT 토큰 발급/검증에 사용하는 설정입니다.
 # secret은 HS256 서명 키로 사용되므로 최소 32바이트(256비트) 이상의 문자열이어야 하며,

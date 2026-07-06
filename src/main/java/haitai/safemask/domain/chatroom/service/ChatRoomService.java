@@ -6,6 +6,7 @@ import haitai.safemask.domain.chatroom.dto.ChatRoomResponse;
 import haitai.safemask.domain.chatroom.entity.ChatRoom;
 import haitai.safemask.domain.chatroom.enums.ChatRoomStatus;
 import haitai.safemask.domain.chatroom.repository.ChatRoomRepository;
+import haitai.safemask.domain.fileasset.service.FileAssetService;
 import haitai.safemask.domain.masking.service.MaskingService;
 import haitai.safemask.domain.member.entity.Member;
 import haitai.safemask.global.exception.CustomException;
@@ -23,6 +24,7 @@ public class ChatRoomService {
 	private final ChatRoomRepository chatRoomRepository;
 	private final ChatMessageRepository chatMessageRepository;
 	private final MaskingService maskingService;
+	private final FileAssetService fileAssetService;
 
 	public List<ChatRoomResponse> findMyRooms(Member member) {
 		return chatRoomRepository.findByMember_IdAndStatusOrderByUpdatedAtDesc(member.getId(),
@@ -51,6 +53,7 @@ public class ChatRoomService {
 			.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
 
 		chatRoom.archive();
+		fileAssetService.deleteFilesForChatRoom(chatRoom.getId());
 		maskingService.clearMappings(chatRoom.getId());
 	}
 }

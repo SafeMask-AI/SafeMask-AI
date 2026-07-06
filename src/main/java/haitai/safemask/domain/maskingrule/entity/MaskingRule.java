@@ -87,6 +87,17 @@ public class MaskingRule {
 		return rule;
 	}
 
+	/**
+	 * 기본 규칙 시더가 코드에 정의된 최신 기본값으로 규칙을 갱신할 때 사용합니다.
+	 * enabled는 건드리지 않습니다 — 관리자가 꺼둔 규칙이 재기동으로 다시 켜지면 안 되기 때문입니다.
+	 */
+	public void applySeedDefaults(MaskingType type, String pattern, Integer priority, String description) {
+		this.type = type;
+		this.pattern = pattern;
+		this.priority = priority;
+		this.description = description;
+	}
+
 	@PrePersist
 	void prePersist() {
 		LocalDateTime now = LocalDateTime.now();

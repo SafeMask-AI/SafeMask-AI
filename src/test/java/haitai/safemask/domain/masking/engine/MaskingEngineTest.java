@@ -308,6 +308,160 @@ class MaskingEngineTest {
 	}
 
 	@Nested
+	@DisplayName("계좌 / 여권 / 운전면허 / 차량 / 주소 탐지")
+	class ExtendedRules {
+
+		@Test
+		@DisplayName("은행명이 앞에 붙은 계좌번호를 은행명까지 포함해 탐지한다")
+		void accountNumberWithBankName() {
+			MaskingResult result = engine.mask("입금 계좌는 카카오뱅크 3333-12-3456789 입니다", rules, assigner);
+
+			assertThat(result.detections()).hasSize(1);
+			assertThat(result.detections().get(0).type()).isEqualTo(MaskingType.ACCOUNT_NUMBER);
+			assertThat(result.detections().get(0).originalValue()).isEqualTo("카카오뱅크 3333-12-3456789");
+		}
+
+		@Test
+		@DisplayName("은행명 없는 숫자 나열은 계좌로 오탐하지 않는다")
+		void plainNumbersNotDetectedAsAccount() {
+			MaskingResult result = engine.mask("일련번호 110-123-456789 조회", rules, assigner);
+
+			assertThat(result.detections()
+				.stream()
+				.filter(d -> d.type() == MaskingType.ACCOUNT_NUMBER))
+				.isEmpty();
+		}
+
+		@Test
+		@DisplayName("여권번호(영문 1자 + 숫자 8자리)를 탐지한다")
+		void passportNumber() {
+			MaskingResult result = engine.mask("여권번호 M12345678 확인 부탁드립니다", rules, assigner);
+
+			assertThat(result.detections()).hasSize(1);
+			assertThat(result.detections().get(0).type()).isEqualTo(MaskingType.PASSPORT);
+			assertThat(result.detections().get(0).originalValue()).isEqualTo("M12345678");
+		}
+
+		@Test
+		@DisplayName("운전면허번호는 LICENSE 1건으로만 탐지된다 (내부 숫자열 이중 탐지 없음)")
+		void driverLicense() {
+			MaskingResult result = engine.mask("면허번호 11-20-123456-78 입니다", rules, assigner);
+
+			assertThat(result.detections()).hasSize(1);
+			assertThat(result.detections().get(0).type()).isEqualTo(MaskingType.DRIVER_LICENSE);
+			assertThat(result.detections().get(0).originalValue()).isEqualTo("11-20-123456-78");
+		}
+
+		@Test
+		@DisplayName("차량번호(2~3자리 + 한글 + 4자리)를 탐지한다")
+		void vehicleNumber() {
+			MaskingResult result = engine.mask("차량번호 12가 3456으로 접수되었습니다", rules, assigner);
+
+			assertThat(result.detections()).hasSize(1);
+			assertThat(result.detections().get(0).type()).isEqualTo(MaskingType.VEHICLE_NUMBER);
+			assertThat(result.detections().get(0).originalValue()).isEqualTo("12가 3456");
+		}
+
+		@Test
+		@DisplayName("도로명 주소를 상세 동/호수까지 통째로 탐지한다")
+		void roadAddress() {
+			MaskingResult result = engine.mask(
+				"주소는 서울특별시 강남구 테헤란로 123 101동 1203호입니다.", rules, assigner);
+
+			assertThat(result.detections()).hasSize(1);
+			assertThat(result.detections().get(0).type()).isEqualTo(MaskingType.ADDRESS);
+			assertThat(result.detections().get(0).originalValue())
+				.isEqualTo("서울특별시 강남구 테헤란로 123 101동 1203호");
+		}
+
+		@Test
+		@DisplayName("아멕스(4-6-5)·다이너스(4-4-4-2) 형식 카드번호도 탐지한다")
+		void nonStandardCardFormats() {
+			assertThat(engine.mask("3714-496353-98431", rules, assigner).detections())
+				.singleElement()
+				.satisfies(d -> assertThat(d.type()).isEqualTo(MaskingType.CARD_NUMBER));
+			assertThat(engine.mask("3000-0000-0000-04", rules, assigner).detections())
+				.singleElement()
+				.satisfies(d -> assertThat(d.type()).isEqualTo(MaskingType.CARD_NUMBER));
+		}
+
+		@Test
+		@DisplayName("점(.) 구분자 휴대폰 번호도 탐지한다")
+		void mobileWithDotSeparator() {
+			MaskingResult result = engine.mask("연락처: 010.9876.5432", rules, assigner);
+
+			assertThat(result.detections()).hasSize(1);
+			assertThat(result.detections().get(0).originalValue()).isEqualTo("010.9876.5432");
+		}
+	}
+
+	@Nested
+	@DisplayName("전파 마스킹 (탐지된 값의 재등장 처리)")
+	class Propagation {
+
+		@Test
+		@DisplayName("셀에서 잡힌 이름이 문장 속에 조사와 함께 재등장해도 같은 토큰으로 마스킹된다")
+		void detectedNamePropagatesIntoSentence() {
+			// "이서연"은 탭 경계의 단독 표기 규칙으로만 잡히고,
+			// "이서연의"는 규칙으로는 못 잡지만 전파 마스킹으로 함께 가려져야 한다
+			String text = "이서연\t920305-2000000\n이서연의 주민번호는 920305-2000000이고 승인 대기중.";
+			MaskingResult result = engine.mask(text, rules, assigner);
+
+			assertThat(result.maskedText()).doesNotContain("이서연", "920305-2000000");
+			long nameTokens = result.detections().stream()
+				.filter(d -> d.type() == MaskingType.NAME)
+				.map(Detection::token)
+				.distinct()
+				.count();
+			assertThat(nameTokens).isEqualTo(1);
+		}
+
+		@Test
+		@DisplayName("전파된 탐지도 인덱스가 원문 위치와 정확히 일치한다")
+		void propagatedIndicesPointToOriginalText() {
+			String text = "박지훈\t박지훈 문의 접수";
+			MaskingResult result = engine.mask(text, rules, assigner);
+
+			for (Detection detection : result.detections()) {
+				assertThat(text.substring(detection.startIndex(), detection.endIndex()))
+					.isEqualTo(detection.originalValue());
+			}
+		}
+	}
+
+	@Nested
+	@DisplayName("엑셀 추출 텍스트 통합 탐지 (실전 시나리오)")
+	class ExcelRowScenario {
+
+		@Test
+		@DisplayName("탭으로 구분된 엑셀 한 행의 모든 민감정보가 남김없이 마스킹된다")
+		void everyPiiInExcelRowMasked() {
+			// 실제 첨부 테스트 파일(pii_masking_test_data_20rows.xlsx)의 1행과 같은 구조
+			String row = "1\t김민준\t010-2345-6789\t02-345-6789\t900101-1000000\t"
+				+ "minjun.kim@example.com\t192.168.10.25\t서울특별시 강남구 테헤란로 123 101동 1203호\t"
+				+ "4111-1111-1111-1111\t국민 123456-78-901234\tM12345678\t11-20-123456-78\t12가 3456\t"
+				+ "김민준 고객님 휴대폰은 010-2345-6789, 이메일은 minjun.kim@example.com, "
+				+ "주소는 서울특별시 강남구 테헤란로 123 101동 1203호입니다.";
+
+			MaskingResult result = engine.mask(row, rules, assigner);
+
+			assertThat(result.maskedText()).doesNotContain(
+				"김민준", "010-2345-6789", "02-345-6789", "900101-1000000",
+				"minjun.kim@example.com", "192.168.10.25", "테헤란로", "4111-1111-1111-1111",
+				"123456-78-901234", "M12345678", "11-20-123456-78", "12가 3456");
+		}
+
+		@Test
+		@DisplayName("헤더 행의 '이메일' 같은 컬럼명은 이름으로 오탐하지 않는다")
+		void headerWordsNotDetectedAsName() {
+			String header = "ID\t이름\t휴대폰\t주민등록번호\t이메일\t주소\t통합문장";
+			MaskingResult result = engine.mask(header, rules, assigner);
+
+			assertThat(result.hasDetections()).isFalse();
+		}
+	}
+
+	@Nested
 	@DisplayName("규칙 오류 내성")
 	class BrokenRule {
 

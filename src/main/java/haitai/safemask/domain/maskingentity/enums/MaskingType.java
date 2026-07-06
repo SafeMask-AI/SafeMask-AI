@@ -41,6 +41,15 @@ public enum MaskingType {
 	/** 내부망 서버·장비의 IP 주소 */
 	IP("IP 주소", "IP"),
 
+	/** 여권번호 */
+	PASSPORT("여권번호", "PASSPORT"),
+
+	/** 운전면허번호 */
+	DRIVER_LICENSE("운전면허번호", "LICENSE"),
+
+	/** 차량번호 (자동차 등록번호판) */
+	VEHICLE_NUMBER("차량번호", "VEHICLE"),
+
 	/** 관리자가 등록한 커스텀 규칙 (프로젝트 코드명, 거래처명 등) */
 	CUSTOM("사용자 지정", "CUSTOM");
 
