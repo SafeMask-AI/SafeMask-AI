@@ -2,11 +2,14 @@ package haitai.safemask.domain.chatmessage.controller;
 
 import haitai.safemask.domain.chatmessage.dto.ChatSendRequest;
 import haitai.safemask.domain.chatmessage.dto.ChatSendResponse;
-import haitai.safemask.domain.chatmessage.service.ChatMessageService;
-import haitai.safemask.domain.member.entity.Member;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import haitai.safemask.domain.chatmessage.dto.ManualMaskRequest;
+import haitai.safemask.domain.chatmessage.service.ChatMessageService;
+import haitai.safemask.domain.member.entity.Member;
+import haitai.safemask.global.exception.CustomException;
+import haitai.safemask.global.exception.ErrorCode;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -26,7 +29,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class ChatMessageController {
 
 	private final ChatMessageService chatMessageService;
-	private final ObjectMapper objectMapper = new ObjectMapper();
+	private final ObjectMapper objectMapper;
 
 	/**
 	 * 채팅 메시지를 전송합니다.
@@ -57,8 +60,8 @@ public class ChatMessageController {
 		try {
 			return objectMapper.readValue(manualMasks, new TypeReference<>() {
 			});
-		} catch (Exception e) {
-			return List.of();
+		} catch (JsonProcessingException e) {
+			throw new CustomException(ErrorCode.INVALID_REQUEST, "추가 마스킹 요청 형식이 올바르지 않습니다.");
 		}
 	}
 }

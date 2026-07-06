@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import java.util.Objects;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.ui.Model;
@@ -20,6 +21,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
  * 그래서 예외가 발생했을 때 요청 성격을 확인한 뒤,
  * 화면 요청이면 에러 페이지를 반환하고 API 요청이면 JSON 응답을 반환합니다.
  */
+@Slf4j
 @ControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -35,6 +37,10 @@ public class GlobalExceptionHandler {
 	public Object handleCustomException(CustomException exception, HttpServletRequest request, Model model) {
 		ErrorCode errorCode = exception.getErrorCode();
 		String message = exception.getMessage();
+		if (errorCode.getStatus().is5xxServerError()) {
+			log.error("Application exception while handling {} {}: {}", request.getMethod(),
+				request.getRequestURI(), errorCode.getCode(), exception);
+		}
 
 		if (isApiRequest(request)) {
 			return ResponseEntity
@@ -113,6 +119,8 @@ public class GlobalExceptionHandler {
 	 */
 	@ExceptionHandler(Exception.class)
 	public Object handleUnexpectedException(Exception exception, HttpServletRequest request, Model model) {
+		log.error("Unexpected exception while handling {} {}", request.getMethod(), request.getRequestURI(), exception);
+
 		ErrorCode errorCode = ErrorCode.INTERNAL_SERVER_ERROR;
 
 		if (isApiRequest(request)) {

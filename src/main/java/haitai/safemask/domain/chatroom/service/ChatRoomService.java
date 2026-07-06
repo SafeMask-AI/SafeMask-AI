@@ -25,9 +25,10 @@ public class ChatRoomService {
 	private final MaskingService maskingService;
 
 	public List<ChatRoomResponse> findMyRooms(Member member) {
-		return chatRoomRepository.findTop30ByMember_IdAndStatusOrderByUpdatedAtDesc(member.getId(),
+		return chatRoomRepository.findByMember_IdAndStatusOrderByUpdatedAtDesc(member.getId(),
 				ChatRoomStatus.ACTIVE)
 			.stream()
+			.limit(30)
 			.map(ChatRoomResponse::from)
 			.toList();
 	}

@@ -16,6 +16,7 @@ public enum ErrorCode {
 	FORBIDDEN(HttpStatus.FORBIDDEN, "COMMON_403", "접근 권한이 없습니다."),
 	NOT_FOUND(HttpStatus.NOT_FOUND, "COMMON_404", "요청한 대상을 찾을 수 없습니다."),
 	INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_500", "서버 내부 오류가 발생했습니다."),
+	AI_SERVICE_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "AI_502_1", "AI 응답을 생성하지 못했습니다. 잠시 후 다시 시도해 주세요."),
 
 	// ===== 인증(Auth) =====
 	// 로그인 실패 시 사번 존재 여부와 비밀번호 오류를 구분해서 알려주면

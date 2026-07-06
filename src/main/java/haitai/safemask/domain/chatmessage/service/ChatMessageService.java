@@ -141,7 +141,7 @@ public class ChatMessageService {
 				restoredAnswer, maskingResult.summary(), detections);
 		} catch (RuntimeException e) {
 			aiRun.markFailed(e.getMessage());
-			throw e;
+			throw new CustomException(ErrorCode.AI_SERVICE_UNAVAILABLE, e);
 		}
 	}
 
@@ -220,7 +220,10 @@ public class ChatMessageService {
 
 	private List<Message> buildPromptMessages(ChatRoom chatRoom) {
 		List<ChatMessage> recentMessages = new ArrayList<>(
-			chatMessageRepository.findTop20ByChatRoomOrderByCreatedAtDesc(chatRoom));
+			chatMessageRepository.findByChatRoomOrderByCreatedAtDesc(chatRoom));
+		if (recentMessages.size() > CONTEXT_MESSAGE_LIMIT) {
+			recentMessages = new ArrayList<>(recentMessages.subList(0, CONTEXT_MESSAGE_LIMIT));
+		}
 		Collections.reverse(recentMessages);
 
 		List<Message> messages = new ArrayList<>();

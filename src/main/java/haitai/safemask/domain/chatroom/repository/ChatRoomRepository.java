@@ -10,5 +10,5 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
 
 	Optional<ChatRoom> findByIdAndMember_IdAndStatus(Long id, Long memberId, ChatRoomStatus status);
 
-	List<ChatRoom> findTop30ByMember_IdAndStatusOrderByUpdatedAtDesc(Long memberId, ChatRoomStatus status);
+	List<ChatRoom> findByMember_IdAndStatusOrderByUpdatedAtDesc(Long memberId, ChatRoomStatus status);
 }

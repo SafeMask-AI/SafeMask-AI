@@ -7,7 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
 
-	List<ChatMessage> findTop20ByChatRoomOrderByCreatedAtDesc(ChatRoom chatRoom);
+	List<ChatMessage> findByChatRoomOrderByCreatedAtDesc(ChatRoom chatRoom);
 
 	List<ChatMessage> findByChatRoomOrderByCreatedAtAsc(ChatRoom chatRoom);
 }
