@@ -1,10 +1,10 @@
 package haitai.safemask.domain.chatmessage.controller;
 
-import haitai.safemask.domain.chatmessage.dto.ChatSendRequest;
-import haitai.safemask.domain.chatmessage.dto.ChatSendResponse;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import haitai.safemask.domain.chatmessage.dto.ChatSendRequest;
+import haitai.safemask.domain.chatmessage.dto.ChatSendResponse;
 import haitai.safemask.domain.chatmessage.dto.ManualMaskRequest;
 import haitai.safemask.domain.chatmessage.service.ChatMessageService;
 import haitai.safemask.domain.member.entity.Member;
@@ -15,12 +15,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 @RestController
@@ -31,12 +31,6 @@ public class ChatMessageController {
 	private final ChatMessageService chatMessageService;
 	private final ObjectMapper objectMapper;
 
-	/**
-	 * 채팅 메시지를 전송합니다.
-	 *
-	 * <p>민감정보가 탐지되면 previewRequired=true 응답을 먼저 내려 사용자의 확인을 받습니다.
-	 * 탐지 0건이거나 approved=true 요청이면 마스킹된 대화 맥락만 GPT로 전송합니다.
-	 */
 	@PostMapping
 	public ResponseEntity<ChatSendResponse> send(@AuthenticationPrincipal Member member,
 		@RequestBody ChatSendRequest request) {
@@ -56,12 +50,13 @@ public class ChatMessageController {
 		return ResponseEntity.ok(chatMessageService.sendWithFiles(member, request, files));
 	}
 
+
 	private List<ManualMaskRequest> parseManualMasks(String manualMasks) {
 		try {
 			return objectMapper.readValue(manualMasks, new TypeReference<>() {
 			});
 		} catch (JsonProcessingException e) {
-			throw new CustomException(ErrorCode.INVALID_REQUEST, "추가 마스킹 요청 형식이 올바르지 않습니다.");
+			throw new CustomException(ErrorCode.INVALID_REQUEST, "Invalid manual mask request format.");
 		}
 	}
 }
