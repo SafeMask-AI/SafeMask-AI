@@ -12,13 +12,14 @@
 	let rooms = [];
 	let attachedFiles = [];
 	let sending = false;
+	let activeRequest = null;
 
 	const SUPPORTED_FILE_TYPES = {
-		txt: { label: 'TXT', kind: 'text' },
-		csv: { label: 'CSV', kind: 'csv' },
-		xlsx: { label: 'XLSX', kind: 'excel' },
-		docx: { label: 'DOCX', kind: 'word' },
-		pdf: { label: 'PDF', kind: 'pdf' }
+		txt: { label: 'TXT', kind: 'text', mark: 'Aa' },
+		csv: { label: 'CSV', kind: 'csv', mark: '1,2' },
+		xlsx: { label: 'XLS', kind: 'excel', mark: '▦' },
+		docx: { label: 'DOC', kind: 'word', mark: '¶' },
+		pdf: { label: 'PDF', kind: 'pdf', mark: 'PDF' }
 	};
 
 	const name = localStorage.getItem('memberName') || '사용자';
@@ -55,6 +56,10 @@
 	loadRooms();
 
 	sendButton.addEventListener('click', function () {
+		if (sending) {
+			cancelActiveRequest();
+			return;
+		}
 		sendMessage(false);
 	});
 
@@ -98,11 +103,11 @@
 	});
 
 	previewCancelButton.addEventListener('click', function () {
-		clearPreviewState({ clearAttachments: true });
+		clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
 	});
 	previewEditButton.addEventListener('click', function () {
 		const content = pendingPreview ? pendingPreview.content : '';
-		clearPreviewState({ restoreAttachments: true });
+		clearPreviewState({ restoreAttachments: true, removePendingUserRow: true });
 		if (content && !messageInput.value.trim()) {
 			messageInput.value = content;
 			resizeComposer();
@@ -124,7 +129,7 @@
 
 	async function sendMessage(approved) {
 		const typedContent = approved && pendingPreview ? pendingPreview.content : messageInput.value.trim();
-		const content = typedContent || (attachedFiles.length > 0 ? '첨부 파일 내용을 분석해줘.' : '');
+		const content = typedContent;
 		if ((!content && attachedFiles.length === 0) || sending) {
 			return;
 		}
@@ -136,17 +141,27 @@
 			attachmentList.hidden = true;
 		}
 		setSending(true);
+		const requestState = {
+			controller: new AbortController(),
+			cancelled: false
+		};
+		activeRequest = requestState;
 
+		let optimisticUserRow = null;
 		if (!approved) {
-			appendMessage('user', buildUserDisplayText(content));
+			optimisticUserRow = appendMessage('user', buildUserDisplayText(content));
 			messageInput.value = '';
 			resizeComposer();
+		} else if (!pendingPreview || !pendingPreview.userRow) {
+			appendMessage('user', buildUserDisplayText(content));
 		}
 
-		const progress = appendProgressMessage(buildProgressSteps(approved, attachedFiles.length > 0));
+		const statusProfile = buildStatusProfile(approved, attachedFiles.length > 0);
+		const statusRow = appendStatusMessage(statusProfile.initial);
+		const statusTicker = startStatusTicker(statusRow, statusProfile);
 
 		try {
-			const response = await sendChatRequest(content, approved);
+			const response = await sendChatRequest(content, approved, requestState.controller.signal);
 
 			if (response.status === 401) {
 				forceLogout();
@@ -159,31 +174,51 @@
 			}
 
 			currentChatRoomId = data.chatRoomId || currentChatRoomId;
-			updateRoomTitle(content);
+			updateRoomTitle(content || buildAttachmentTitle());
 			loadRooms();
 
 			if (data.previewRequired) {
-				progress.stop();
-				removeMessageRow(progress.row);
-				pendingPreview = { content: content, hasFiles: attachedFiles.length > 0 };
+				stopStatusTicker(statusTicker);
+				removeMessageRow(statusRow);
+				pendingPreview = {
+					content: content,
+					hasFiles: attachedFiles.length > 0,
+					userRow: optimisticUserRow
+				};
 				manualMasks = [];
 				showPreview(data);
 				attachmentList.hidden = true;
 				return;
 			}
 
+			stopStatusTicker(statusTicker);
+			await replaceStatusWithTypingMessage(statusRow, data.assistantContent || '', function () {
+				return requestState.cancelled;
+			});
 			pendingPreview = null;
 			manualMasks = [];
 			attachedFiles = [];
 			renderAttachments();
-			progress.complete();
-			await appendTypingMessage('assistant', data.assistantContent || '');
-			removeMessageRow(progress.row);
 		} catch (error) {
-			progress.stop();
-			removeMessageRow(progress.row);
-			appendMessage('system', resolveRequestErrorMessage(error));
+			stopStatusTicker(statusTicker);
+			removeMessageRow(statusRow);
+			if (error.name === 'AbortError') {
+					if (optimisticUserRow && !approved) {
+						removeMessageRow(optimisticUserRow);
+						messageInput.value = content;
+						resizeComposer();
+					}
+				if (approved && pendingPreview) {
+					maskingPreview.hidden = false;
+					attachmentList.hidden = true;
+				}
+			} else {
+				appendMessage('system', resolveRequestErrorMessage(error));
+			}
 		} finally {
+			if (activeRequest === requestState) {
+				activeRequest = null;
+			}
 			setSending(false);
 		}
 	}
@@ -218,6 +253,7 @@
 		row.appendChild(body);
 		messageList.appendChild(row);
 		messageList.scrollTop = messageList.scrollHeight;
+		return row;
 	}
 
 	function appendStatusMessage(text) {
@@ -261,120 +297,105 @@
 		}
 	}
 
-	function startStatusTicker(row, messages, intervalMs) {
-		let index = 0;
-		updateStatusMessage(row, messages[index]);
-		return window.setInterval(function () {
-			index = (index + 1) % messages.length;
-			updateStatusMessage(row, messages[index]);
-		}, intervalMs);
-	}
-
-	function stopStatusTicker(ticker) {
-		if (ticker) {
-			window.clearInterval(ticker);
-		}
-	}
-
-	function appendProgressMessage(steps) {
-		setChatting(true);
-
-		const row = document.createElement('div');
-		row.className = 'message-row assistant status progress-status';
-
-		const avatar = document.createElement('div');
-		avatar.className = 'message-avatar';
-		avatar.textContent = 'AI';
-
-		const body = document.createElement('div');
-		body.className = 'message-body';
-
-		const author = document.createElement('div');
-		author.className = 'message-author';
-		author.textContent = '해태 사내 AI';
-
-		const bubble = document.createElement('div');
-		bubble.className = 'message-bubble status-bubble progress-bubble';
-
-		const stepList = document.createElement('ol');
-		stepList.className = 'progress-steps';
-		const items = steps.map(function (step, index) {
-			const item = document.createElement('li');
-			item.className = 'progress-step';
-
-			const number = document.createElement('span');
-			number.className = 'step-number';
-			number.textContent = String(index + 1);
-
-			const label = document.createElement('span');
-			label.className = 'step-label';
-			label.textContent = step;
-
-			item.appendChild(number);
-			item.appendChild(label);
-			stepList.appendChild(item);
-			return item;
-		});
-
-		bubble.appendChild(stepList);
-		body.appendChild(author);
-		body.appendChild(bubble);
-		row.appendChild(avatar);
-		row.appendChild(body);
-		messageList.appendChild(row);
-		messageList.scrollTop = messageList.scrollHeight;
-
-		let index = 0;
+	function startStatusTicker(row, profile) {
 		let timer = null;
+		let lastMessage = profile.initial;
+		const startedAt = Date.now();
 
-		function render() {
-			items.forEach(function (item, itemIndex) {
-				item.classList.toggle('done', itemIndex < index);
-				item.classList.toggle('current', itemIndex === index);
+		function pickMessage(messages) {
+			const candidates = messages.filter(function (message) {
+				return message !== lastMessage;
 			});
+			const pool = candidates.length > 0 ? candidates : messages;
+			return pool[Math.floor(Math.random() * pool.length)];
+		}
+
+		function nextDelay(elapsedMs) {
+			if (elapsedMs < 5000) {
+				return randomBetween(2800, 4600);
+			}
+			if (elapsedMs < 12000) {
+				return randomBetween(4200, 6800);
+			}
+			return randomBetween(6500, 9500);
 		}
 
 		function schedule() {
+			const elapsedMs = Date.now() - startedAt;
 			timer = window.setTimeout(function () {
-				if (index < items.length - 1) {
-					index += 1;
-					render();
-					schedule();
-				}
-			}, index === 0 ? 900 : 1500);
+				const currentElapsedMs = Date.now() - startedAt;
+				const messages = currentElapsedMs >= 12000 ? profile.slow : profile.normal;
+				lastMessage = pickMessage(messages);
+				updateStatusMessage(row, lastMessage);
+				schedule();
+			}, nextDelay(elapsedMs));
 		}
 
-		render();
 		schedule();
-
 		return {
-			row: row,
 			stop: function () {
 				if (timer) {
 					window.clearTimeout(timer);
 				}
-			},
-			complete: function () {
-				if (timer) {
-					window.clearTimeout(timer);
-				}
-				index = items.length;
-				items.forEach(function (item) {
-					item.classList.add('done');
-					item.classList.remove('current');
-				});
 			}
 		};
 	}
 
-	function buildProgressSteps(approved, hasFiles) {
+	function stopStatusTicker(ticker) {
+		if (ticker) {
+			ticker.stop();
+		}
+	}
+
+	function randomBetween(min, max) {
+		return Math.floor(Math.random() * (max - min + 1)) + min;
+	}
+
+	function buildStatusProfile(approved, hasFiles) {
 		if (approved) {
-			return ['승인 내용 적용', '보안 문맥 구성', 'AI 답변 생성', '결과 정리'];
+			return {
+				initial: '승인된 내용으로 답변을 요청하는 중...',
+				normal: [
+					'보안 처리된 문맥을 정리하는 중...',
+					'AI 답변을 기다리는 중...',
+					'응답에 필요한 내용을 맞춰보는 중...'
+				],
+				slow: [
+					'조금 더 확인하고 있어요. 잠시만 기다려 주세요...',
+					'답변을 마무리하는 데 시간이 조금 걸리고 있어요...',
+					'결과를 정리하는 중...'
+				]
+			};
 		}
 		if (hasFiles) {
-			return ['파일 내용 확인', '민감정보 탐지', '미리보기 준비', '응답 준비'];
+			return {
+				initial: '첨부 파일을 살펴보는 중...',
+				normal: [
+					'문서 내용을 읽고 있어요...',
+					'표와 텍스트를 확인하는 중...',
+					'민감정보가 있는 부분을 살펴보는 중...',
+					'안전하게 가릴 내용을 정리하는 중...'
+				],
+				slow: [
+					'파일 내용이 조금 많아요. 계속 확인하고 있어요...',
+					'조금 더 확인하고 있어요. 잠시만 기다려 주세요...',
+					'문서 내용을 정리하는 데 시간이 조금 걸리고 있어요...'
+				]
+			};
 		}
-		return ['입력 내용 확인', '민감정보 탐지', '미리보기 준비', '응답 준비'];
+		return {
+			initial: '메시지를 살펴보는 중...',
+			normal: [
+				'민감정보가 있는 부분을 확인하는 중...',
+				'안전하게 가릴 내용을 정리하는 중...',
+				'답변에 쓸 문맥을 준비하는 중...'
+			],
+			slow: [
+				'조금 더 확인하고 있어요. 잠시만 기다려 주세요...',
+				'응답을 준비하는 데 시간이 조금 걸리고 있어요...',
+				'결과를 정리하는 중...'
+			]
+		};
 	}
 
 	function removeMessageRow(row) {
@@ -408,8 +429,41 @@
 		row.appendChild(body);
 		messageList.appendChild(row);
 
+		await typeTextIntoBubble(bubble, text);
+		if (role === 'assistant') {
+			attachGeneratedFileCards(body, text);
+		}
+		messageList.scrollTop = messageList.scrollHeight;
+	}
+
+	async function replaceStatusWithTypingMessage(row, text, shouldCancel) {
+		if (!row) {
+			await appendTypingMessage('assistant', text);
+			return;
+		}
+
+		row.classList.remove('status');
+		const body = row.querySelector('.message-body');
+		const statusBubble = row.querySelector('.message-bubble');
+		if (!body || !statusBubble) {
+			await appendTypingMessage('assistant', text);
+			return;
+		}
+
+		const bubble = document.createElement('div');
+		bubble.className = 'message-bubble';
+		body.replaceChild(bubble, statusBubble);
+		await typeTextIntoBubble(bubble, text, shouldCancel);
+		attachGeneratedFileCards(body, text);
+		messageList.scrollTop = messageList.scrollHeight;
+	}
+
+	async function typeTextIntoBubble(bubble, text, shouldCancel) {
 		const baseDelay = text.length > 900 ? 8 : text.length > 450 ? 14 : 20;
 		for (let i = 0; i < text.length; i += 1) {
+			if (shouldCancel && shouldCancel()) {
+				throw new DOMException('Aborted', 'AbortError');
+			}
 			const char = text.charAt(i);
 			bubble.textContent += char;
 			const punctuationPause = /[.!?。！？\n]/.test(char);
@@ -418,10 +472,6 @@
 				await sleep(punctuationPause ? baseDelay * 5 : baseDelay);
 			}
 		}
-		if (role === 'assistant') {
-			attachGeneratedFileCards(body, text);
-		}
-		messageList.scrollTop = messageList.scrollHeight;
 	}
 
 	function sleep(ms) {
@@ -554,6 +604,10 @@
 	function clearPreviewState(options) {
 		const clearAttachments = Boolean(options && options.clearAttachments);
 		const restoreAttachments = !options || options.restoreAttachments !== false;
+		const removePendingUserRow = Boolean(options && options.removePendingUserRow);
+		if (removePendingUserRow && pendingPreview && pendingPreview.userRow) {
+			removeMessageRow(pendingPreview.userRow);
+		}
 		maskingPreview.hidden = true;
 		previewSummary.textContent = '';
 		previewText.textContent = '';
@@ -568,7 +622,7 @@
 		renderAttachments();
 	}
 
-	function sendChatRequest(content, approved) {
+	function sendChatRequest(content, approved, signal) {
 		if (attachedFiles.length === 0) {
 			return fetch('/api/chat/messages', {
 				method: 'POST',
@@ -581,7 +635,8 @@
 					content: content,
 					approved: approved,
 					manualMasks: approved ? manualMasks : []
-				})
+				}),
+				signal: signal
 			});
 		}
 
@@ -601,7 +656,8 @@
 			headers: {
 				'Authorization': `Bearer ${accessToken}`
 			},
-			body: formData
+			body: formData,
+			signal: signal
 		});
 	}
 
@@ -635,7 +691,14 @@
 
 			const badge = document.createElement('span');
 			badge.className = `file-type-badge ${type.kind}`;
-			badge.textContent = type.label;
+			const mark = document.createElement('span');
+			mark.className = 'file-type-mark';
+			mark.textContent = type.mark;
+			const label = document.createElement('span');
+			label.className = 'file-type-label';
+			label.textContent = type.label;
+			badge.appendChild(mark);
+			badge.appendChild(label);
 
 			const meta = document.createElement('span');
 			meta.className = 'file-meta';
@@ -691,7 +754,17 @@
 		const fileText = attachedFiles.map(function (file) {
 			return `- ${file.name} (${formatFileSize(file.size)})`;
 		}).join('\n');
+		if (!content) {
+			return `첨부 파일\n${fileText}`;
+		}
 		return `${content}\n\n첨부 파일\n${fileText}`;
+	}
+
+	function buildAttachmentTitle() {
+		if (attachedFiles.length === 1) {
+			return `${attachedFiles[0].name} 분석`;
+		}
+		return `첨부 파일 ${attachedFiles.length}개 분석`;
 	}
 
 	function formatFileSize(size) {
@@ -887,9 +960,18 @@
 
 	function setSending(value) {
 		sending = value;
-		sendButton.disabled = value;
+		sendButton.disabled = false;
 		previewApproveButton.disabled = value;
-		sendButton.textContent = value ? '...' : '↑';
+		sendButton.textContent = value ? '■' : '↑';
+		sendButton.title = value ? '전송 취소' : '전송';
+		sendButton.classList.toggle('cancel-mode', value);
+	}
+
+	function cancelActiveRequest() {
+		if (activeRequest) {
+			activeRequest.cancelled = true;
+			activeRequest.controller.abort();
+		}
 	}
 
 	function resizeComposer() {
