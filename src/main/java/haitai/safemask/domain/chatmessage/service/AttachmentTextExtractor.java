@@ -10,6 +10,10 @@ import java.util.List;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import org.apache.poi.hwpf.HWPFDocument;
+import org.apache.poi.hwpf.extractor.WordExtractor;
+import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -17,8 +21,13 @@ import org.springframework.web.multipart.MultipartFile;
  * 첨부 파일에서 GPT에 전달할 텍스트를 추출합니다.
  *
  * <p>민감정보 보호 원칙상 추출된 텍스트도 일반 입력과 동일하게 마스킹 파이프라인을 거친 뒤
- * GPT로 전달됩니다. 현재는 외부 라이브러리 없이 JDK로 안정적으로 처리 가능한 txt/csv/xlsx/docx를
- * 지원하고, PDF는 파일 메타데이터만 전달합니다.
+ * GPT로 전달됩니다. 즉, Word/Excel 파일 안의 이름·전화번호·계좌번호도 먼저 토큰으로 치환된 다음
+ * 모델에 전달됩니다.
+ *
+ * <p>txt/csv는 UTF-8 텍스트로 바로 읽고, xlsx는 최소 XML 파서로 셀 값을 추출합니다.
+ * Word 문서는 문단·표·머리글 같은 구조가 여러 XML/바이너리 스트림에 나뉘어 있으므로
+ * Apache POI 전용 추출기를 사용합니다. PDF는 아직 본문 추출기를 연결하지 않았기 때문에
+ * 파일명/크기 안내만 전달합니다.
  */
 @Component
 public class AttachmentTextExtractor {
@@ -50,6 +59,7 @@ public class AttachmentTextExtractor {
 			return switch (extension) {
 				case "txt", "csv" -> limit(new String(file.getBytes(), StandardCharsets.UTF_8));
 				case "xlsx" -> limit(extractXlsx(file.getBytes()));
+				case "doc" -> limit(extractDoc(file.getBytes()));
 				case "docx" -> limit(extractDocx(file.getBytes()));
 				case "pdf" -> "PDF 파일은 첨부되었습니다. 현재 단계에서는 파일명/크기만 참고할 수 있습니다. "
 					+ "본문 추출은 PDF 처리 모듈 연결 후 지원됩니다. 크기: " + file.getSize() + " bytes";
@@ -93,17 +103,33 @@ public class AttachmentTextExtractor {
 		return sheets.toString().trim();
 	}
 
-	private String extractDocx(byte[] bytes) throws IOException {
-		try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
-			ZipEntry entry;
-			while ((entry = zip.getNextEntry()) != null) {
-				if ("word/document.xml".equals(entry.getName())) {
-					String xml = new String(zip.readAllBytes(), StandardCharsets.UTF_8);
-					return normalizeXmlText(xml);
-				}
-			}
+	/**
+	 * 구형 Word(.doc)에서 본문 텍스트를 추출합니다.
+	 *
+	 * <p>.doc는 zip 기반의 OOXML(.docx)이 아니라 OLE2 바이너리 형식입니다.
+	 * 직접 바이트를 문자열로 변환하면 대부분 깨지고 민감정보 탐지가 실패하므로
+	 * POI의 HWPF/WordExtractor가 문서 내부 스트림을 해석하도록 맡깁니다.
+	 */
+	private String extractDoc(byte[] bytes) throws IOException {
+		try (HWPFDocument document = new HWPFDocument(new ByteArrayInputStream(bytes));
+			 WordExtractor extractor = new WordExtractor(document)) {
+			return normalizeExtractedText(extractor.getText());
 		}
-		return "";
+	}
+
+	/**
+	 * Word(.docx)에서 본문 텍스트를 추출합니다.
+	 *
+	 * <p>.docx도 zip 안의 word/document.xml만 읽으면 단순 문단 일부는 보이지만,
+	 * 표·머리글·바닥글·각주처럼 Word가 별도 파트로 저장하는 내용은 빠질 수 있습니다.
+	 * 사용자는 "문서 전체가 마스킹 대상"이라고 기대하므로 Word 전용 추출기를 사용해
+	 * 가능한 모든 텍스트를 마스킹 파이프라인에 태웁니다.
+	 */
+	private String extractDocx(byte[] bytes) throws IOException {
+		try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes));
+			 XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
+			return normalizeExtractedText(extractor.getText());
+		}
 	}
 
 	/**
@@ -156,6 +182,24 @@ public class AttachmentTextExtractor {
 	private String normalizeXmlText(String xml) {
 		return unescapeXml(XML_TAG.matcher(xml).replaceAll(" "))
 			.replaceAll("\\s+", " ")
+			.trim();
+	}
+
+	/**
+	 * Office 추출기가 반환한 공백을 마스킹 엔진이 처리하기 좋은 형태로 정리합니다.
+	 *
+	 * <p>연속 공백은 하나로 줄이되 줄바꿈은 유지합니다. 줄바꿈을 보존해야 표/문단의 경계가 남고,
+	 * 미리보기에서도 사용자가 어느 위치의 값이 마스킹되는지 확인하기 쉽습니다.
+	 */
+	private String normalizeExtractedText(String text) {
+		if (text == null || text.isBlank()) {
+			return "";
+		}
+		return text.replace("\r\n", "\n")
+			.replace('\r', '\n')
+			.replaceAll("[\\t\\x0B\\f ]+", " ")
+			.replaceAll(" *\\n *", "\n")
+			.replaceAll("\\n{3,}", "\n\n")
 			.trim();
 	}
 

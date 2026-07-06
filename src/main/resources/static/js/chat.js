@@ -507,7 +507,10 @@
 	}
 
 	function addFiles(files) {
-		const allowed = ['txt', 'csv', 'xlsx', 'docx', 'pdf'];
+		// 서버의 AttachmentTextExtractor가 처리할 수 있는 확장자와 맞춥니다.
+		// Word 파일은 구형 .doc와 최신 .docx를 모두 허용하며, 업로드 후 서버에서 본문을 추출해
+		// 일반 채팅 입력과 동일한 마스킹 미리보기/승인 흐름을 거칩니다.
+		const allowed = ['txt', 'csv', 'xlsx', 'doc', 'docx', 'pdf'];
 		files.forEach(function (file) {
 			const extension = file.name.split('.').pop().toLowerCase();
 			if (!allowed.includes(extension)) {

@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
@@ -60,6 +61,17 @@ class AttachmentTextExtractorTest {
 		assertThat(extracted).doesNotContain("휴대폰\t김민준");
 	}
 
+	@Test
+	@DisplayName("docx 본문도 첨부 텍스트로 추출되어 마스킹 대상이 된다")
+	void docxTextExtractedForMaskingPipeline() throws IOException {
+		byte[] docx = buildDocx("담당자 김민수 연락처 010-2345-6789");
+
+		String extracted = extractor.extract(List.of(new MockMultipartFile("files", "word-test.docx",
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx)));
+
+		assertThat(extracted).contains("word-test.docx", "김민수", "010-2345-6789");
+	}
+
 	/**
 	 * 최소 구성의 xlsx(zip)를 만듭니다. 내용: 헤더(이름/휴대폰) + 데이터 1행(김민준/010-2345-6789).
 	 *
@@ -95,5 +107,14 @@ class AttachmentTextExtractorTest {
 		zip.putNextEntry(new ZipEntry(name));
 		zip.write(content.getBytes(StandardCharsets.UTF_8));
 		zip.closeEntry();
+	}
+
+	private byte[] buildDocx(String text) throws IOException {
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		try (XWPFDocument document = new XWPFDocument()) {
+			document.createParagraph().createRun().setText(text);
+			document.write(out);
+		}
+		return out.toByteArray();
 	}
 }
