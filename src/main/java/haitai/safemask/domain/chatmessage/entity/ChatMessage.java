@@ -52,12 +52,12 @@ public class ChatMessage {
 
 	/** 원본 내용 (사내에만 보관, 사용자 화면에 표시되는 텍스트) */
 	@Lob
-	@Column(nullable = false, columnDefinition = "LONGTEXT")
+	@Column(nullable = false)
 	private String originalContent;
 
 	/** 마스킹된 내용 (GPT API로 실제 송수신된 텍스트) */
 	@Lob
-	@Column(columnDefinition = "LONGTEXT")
+	@Column
 	private String maskedContent;
 
 	@Column(nullable = false, updatable = false)
