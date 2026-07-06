@@ -12,18 +12,15 @@
 	let rooms = [];
 	let attachedFiles = [];
 	let sending = false;
+	let activeRequest = null;
 
-	const maskingMessages = [
-		'입력 내용을 확인하고 있습니다...',
-		'민감정보 패턴을 검사하고 있습니다...',
-		'토큰 치환이 필요한 항목을 찾고 있습니다...'
-	];
-	const aiMessages = [
-		'보안 처리된 문맥을 구성하고 있습니다...',
-		'이전 대화 맥락을 함께 정리하고 있습니다...',
-		'AI 답변을 생성하고 있습니다...',
-		'토큰 형식을 유지하며 응답을 검토하고 있습니다...'
-	];
+	const SUPPORTED_FILE_TYPES = {
+		txt: { label: 'TXT', kind: 'text', mark: 'Aa' },
+		csv: { label: 'CSV', kind: 'csv', mark: '1,2' },
+		xlsx: { label: 'XLS', kind: 'excel', mark: '▦' },
+		docx: { label: 'DOC', kind: 'word', mark: '¶' },
+		pdf: { label: 'PDF', kind: 'pdf', mark: 'PDF' }
+	};
 
 	const name = localStorage.getItem('memberName') || '사용자';
 	const department = localStorage.getItem('memberDepartment') || '';
@@ -40,6 +37,7 @@
 	const attachButton = document.getElementById('attachButton');
 	const fileInput = document.getElementById('fileInput');
 	const attachmentList = document.getElementById('attachmentList');
+	const attachmentNotice = document.getElementById('attachmentNotice');
 	const maskingPreview = document.getElementById('maskingPreview');
 	const previewSummary = document.getElementById('previewSummary');
 	const previewText = document.getElementById('previewText');
@@ -58,6 +56,10 @@
 	loadRooms();
 
 	sendButton.addEventListener('click', function () {
+		if (sending) {
+			cancelActiveRequest();
+			return;
+		}
 		sendMessage(false);
 	});
 
@@ -100,9 +102,16 @@
 		sendMessage(true);
 	});
 
-	previewCancelButton.addEventListener('click', hidePreview);
+	previewCancelButton.addEventListener('click', function () {
+		clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
+	});
 	previewEditButton.addEventListener('click', function () {
-		hidePreview();
+		const content = pendingPreview ? pendingPreview.content : '';
+		clearPreviewState({ restoreAttachments: true, removePendingUserRow: true });
+		if (content && !messageInput.value.trim()) {
+			messageInput.value = content;
+			resizeComposer();
+		}
 		messageInput.focus();
 	});
 
@@ -120,34 +129,39 @@
 
 	async function sendMessage(approved) {
 		const typedContent = approved && pendingPreview ? pendingPreview.content : messageInput.value.trim();
-		const content = typedContent || (attachedFiles.length > 0 ? '첨부 파일 내용을 분석해줘.' : '');
+		const content = typedContent;
 		if ((!content && attachedFiles.length === 0) || sending) {
 			return;
 		}
 
 		if (!approved) {
-			hidePreview();
+			clearPreviewState({ restoreAttachments: true });
 		} else {
 			maskingPreview.hidden = true;
 			attachmentList.hidden = true;
 		}
 		setSending(true);
+		const requestState = {
+			controller: new AbortController(),
+			cancelled: false
+		};
+		activeRequest = requestState;
 
+		let optimisticUserRow = null;
 		if (!approved) {
-			appendMessage('user', buildUserDisplayText(content));
+			optimisticUserRow = appendMessage('user', buildUserDisplayText(content));
 			messageInput.value = '';
 			resizeComposer();
+		} else if (!pendingPreview || !pendingPreview.userRow) {
+			appendMessage('user', buildUserDisplayText(content));
 		}
 
-		const statusRow = appendStatusMessage(approved ? aiMessages[0] : maskingMessages[0]);
-		let statusTicker = startStatusTicker(statusRow, approved ? aiMessages : maskingMessages, 900);
-		const generationTimer = approved ? null : window.setTimeout(function () {
-			stopStatusTicker(statusTicker);
-			statusTicker = startStatusTicker(statusRow, aiMessages, 1200);
-		}, 1600);
+		const statusProfile = buildStatusProfile(approved, attachedFiles.length > 0);
+		const statusRow = appendStatusMessage(statusProfile.initial);
+		const statusTicker = startStatusTicker(statusRow, statusProfile);
 
 		try {
-			const response = await sendChatRequest(content, approved);
+			const response = await sendChatRequest(content, approved, requestState.controller.signal);
 
 			if (response.status === 401) {
 				forceLogout();
@@ -160,41 +174,51 @@
 			}
 
 			currentChatRoomId = data.chatRoomId || currentChatRoomId;
-			updateRoomTitle(content);
+			updateRoomTitle(content || buildAttachmentTitle());
 			loadRooms();
 
 			if (data.previewRequired) {
-				if (generationTimer) {
-					window.clearTimeout(generationTimer);
-				}
 				stopStatusTicker(statusTicker);
 				removeMessageRow(statusRow);
-				pendingPreview = { content: content, hasFiles: attachedFiles.length > 0 };
+				pendingPreview = {
+					content: content,
+					hasFiles: attachedFiles.length > 0,
+					userRow: optimisticUserRow
+				};
 				manualMasks = [];
 				showPreview(data);
 				attachmentList.hidden = true;
 				return;
 			}
 
+			stopStatusTicker(statusTicker);
+			await replaceStatusWithTypingMessage(statusRow, data.assistantContent || '', function () {
+				return requestState.cancelled;
+			});
 			pendingPreview = null;
 			manualMasks = [];
 			attachedFiles = [];
 			renderAttachments();
-			if (generationTimer) {
-				window.clearTimeout(generationTimer);
-			}
-			stopStatusTicker(statusTicker);
-			updateStatusMessage(statusRow, '답변을 화면에 정리하고 있습니다...');
-			await appendTypingMessage('assistant', data.assistantContent || '');
-			removeMessageRow(statusRow);
 		} catch (error) {
-			if (generationTimer) {
-				window.clearTimeout(generationTimer);
-			}
 			stopStatusTicker(statusTicker);
 			removeMessageRow(statusRow);
-			appendMessage('system', resolveRequestErrorMessage(error));
+			if (error.name === 'AbortError') {
+					if (optimisticUserRow && !approved) {
+						removeMessageRow(optimisticUserRow);
+						messageInput.value = content;
+						resizeComposer();
+					}
+				if (approved && pendingPreview) {
+					maskingPreview.hidden = false;
+					attachmentList.hidden = true;
+				}
+			} else {
+				appendMessage('system', resolveRequestErrorMessage(error));
+			}
 		} finally {
+			if (activeRequest === requestState) {
+				activeRequest = null;
+			}
 			setSending(false);
 		}
 	}
@@ -229,6 +253,7 @@
 		row.appendChild(body);
 		messageList.appendChild(row);
 		messageList.scrollTop = messageList.scrollHeight;
+		return row;
 	}
 
 	function appendStatusMessage(text) {
@@ -272,19 +297,105 @@
 		}
 	}
 
-	function startStatusTicker(row, messages, intervalMs) {
-		let index = 0;
-		updateStatusMessage(row, messages[index]);
-		return window.setInterval(function () {
-			index = (index + 1) % messages.length;
-			updateStatusMessage(row, messages[index]);
-		}, intervalMs);
+	function startStatusTicker(row, profile) {
+		let timer = null;
+		let lastMessage = profile.initial;
+		const startedAt = Date.now();
+
+		function pickMessage(messages) {
+			const candidates = messages.filter(function (message) {
+				return message !== lastMessage;
+			});
+			const pool = candidates.length > 0 ? candidates : messages;
+			return pool[Math.floor(Math.random() * pool.length)];
+		}
+
+		function nextDelay(elapsedMs) {
+			if (elapsedMs < 5000) {
+				return randomBetween(2800, 4600);
+			}
+			if (elapsedMs < 12000) {
+				return randomBetween(4200, 6800);
+			}
+			return randomBetween(6500, 9500);
+		}
+
+		function schedule() {
+			const elapsedMs = Date.now() - startedAt;
+			timer = window.setTimeout(function () {
+				const currentElapsedMs = Date.now() - startedAt;
+				const messages = currentElapsedMs >= 12000 ? profile.slow : profile.normal;
+				lastMessage = pickMessage(messages);
+				updateStatusMessage(row, lastMessage);
+				schedule();
+			}, nextDelay(elapsedMs));
+		}
+
+		schedule();
+		return {
+			stop: function () {
+				if (timer) {
+					window.clearTimeout(timer);
+				}
+			}
+		};
 	}
 
 	function stopStatusTicker(ticker) {
 		if (ticker) {
-			window.clearInterval(ticker);
+			ticker.stop();
 		}
+	}
+
+	function randomBetween(min, max) {
+		return Math.floor(Math.random() * (max - min + 1)) + min;
+	}
+
+	function buildStatusProfile(approved, hasFiles) {
+		if (approved) {
+			return {
+				initial: '승인된 내용으로 답변을 요청하는 중...',
+				normal: [
+					'보안 처리된 문맥을 정리하는 중...',
+					'AI 답변을 기다리는 중...',
+					'응답에 필요한 내용을 맞춰보는 중...'
+				],
+				slow: [
+					'조금 더 확인하고 있어요. 잠시만 기다려 주세요...',
+					'답변을 마무리하는 데 시간이 조금 걸리고 있어요...',
+					'결과를 정리하는 중...'
+				]
+			};
+		}
+		if (hasFiles) {
+			return {
+				initial: '첨부 파일을 살펴보는 중...',
+				normal: [
+					'문서 내용을 읽고 있어요...',
+					'표와 텍스트를 확인하는 중...',
+					'민감정보가 있는 부분을 살펴보는 중...',
+					'안전하게 가릴 내용을 정리하는 중...'
+				],
+				slow: [
+					'파일 내용이 조금 많아요. 계속 확인하고 있어요...',
+					'조금 더 확인하고 있어요. 잠시만 기다려 주세요...',
+					'문서 내용을 정리하는 데 시간이 조금 걸리고 있어요...'
+				]
+			};
+		}
+		return {
+			initial: '메시지를 살펴보는 중...',
+			normal: [
+				'민감정보가 있는 부분을 확인하는 중...',
+				'안전하게 가릴 내용을 정리하는 중...',
+				'답변에 쓸 문맥을 준비하는 중...'
+			],
+			slow: [
+				'조금 더 확인하고 있어요. 잠시만 기다려 주세요...',
+				'응답을 준비하는 데 시간이 조금 걸리고 있어요...',
+				'결과를 정리하는 중...'
+			]
+		};
 	}
 
 	function removeMessageRow(row) {
@@ -318,18 +429,49 @@
 		row.appendChild(body);
 		messageList.appendChild(row);
 
-		const delay = text.length > 600 ? 4 : 12;
-		for (let i = 0; i < text.length; i += 1) {
-			bubble.textContent += text.charAt(i);
-			if (i % 3 === 0) {
-				messageList.scrollTop = messageList.scrollHeight;
-				await sleep(delay);
-			}
-		}
+		await typeTextIntoBubble(bubble, text);
 		if (role === 'assistant') {
 			attachGeneratedFileCards(body, text);
 		}
 		messageList.scrollTop = messageList.scrollHeight;
+	}
+
+	async function replaceStatusWithTypingMessage(row, text, shouldCancel) {
+		if (!row) {
+			await appendTypingMessage('assistant', text);
+			return;
+		}
+
+		row.classList.remove('status');
+		const body = row.querySelector('.message-body');
+		const statusBubble = row.querySelector('.message-bubble');
+		if (!body || !statusBubble) {
+			await appendTypingMessage('assistant', text);
+			return;
+		}
+
+		const bubble = document.createElement('div');
+		bubble.className = 'message-bubble';
+		body.replaceChild(bubble, statusBubble);
+		await typeTextIntoBubble(bubble, text, shouldCancel);
+		attachGeneratedFileCards(body, text);
+		messageList.scrollTop = messageList.scrollHeight;
+	}
+
+	async function typeTextIntoBubble(bubble, text, shouldCancel) {
+		const baseDelay = text.length > 900 ? 8 : text.length > 450 ? 14 : 20;
+		for (let i = 0; i < text.length; i += 1) {
+			if (shouldCancel && shouldCancel()) {
+				throw new DOMException('Aborted', 'AbortError');
+			}
+			const char = text.charAt(i);
+			bubble.textContent += char;
+			const punctuationPause = /[.!?。！？\n]/.test(char);
+			if (punctuationPause || (i > 0 && i % 8 === 0)) {
+				messageList.scrollTop = messageList.scrollHeight;
+				await sleep(punctuationPause ? baseDelay * 5 : baseDelay);
+			}
+		}
 	}
 
 	function sleep(ms) {
@@ -459,17 +601,28 @@
 		return lines.join('\n');
 	}
 
-	function hidePreview() {
+	function clearPreviewState(options) {
+		const clearAttachments = Boolean(options && options.clearAttachments);
+		const restoreAttachments = !options || options.restoreAttachments !== false;
+		const removePendingUserRow = Boolean(options && options.removePendingUserRow);
+		if (removePendingUserRow && pendingPreview && pendingPreview.userRow) {
+			removeMessageRow(pendingPreview.userRow);
+		}
 		maskingPreview.hidden = true;
 		previewSummary.textContent = '';
 		previewText.textContent = '';
 		manualMaskValue.value = '';
+		pendingPreview = null;
 		manualMasks = [];
-		attachmentList.hidden = false;
+		if (clearAttachments) {
+			attachedFiles = [];
+		}
+		attachmentList.hidden = !restoreAttachments || attachedFiles.length === 0;
 		renderManualMasks();
+		renderAttachments();
 	}
 
-	function sendChatRequest(content, approved) {
+	function sendChatRequest(content, approved, signal) {
 		if (attachedFiles.length === 0) {
 			return fetch('/api/chat/messages', {
 				method: 'POST',
@@ -482,7 +635,8 @@
 					content: content,
 					approved: approved,
 					manualMasks: approved ? manualMasks : []
-				})
+				}),
+				signal: signal
 			});
 		}
 
@@ -502,21 +656,29 @@
 			headers: {
 				'Authorization': `Bearer ${accessToken}`
 			},
-			body: formData
+			body: formData,
+			signal: signal
 		});
 	}
 
 	function addFiles(files) {
-		const allowed = ['txt', 'csv', 'xlsx', 'docx', 'pdf'];
+		const rejected = [];
 		files.forEach(function (file) {
-			const extension = file.name.split('.').pop().toLowerCase();
-			if (!allowed.includes(extension)) {
-				appendMessage('system', `${file.name} 파일 형식은 아직 지원하지 않습니다.`);
+			const type = getFileType(file.name);
+			if (!type) {
+				rejected.push(file.name);
 				return;
 			}
 			attachedFiles.push(file);
 		});
 		renderAttachments();
+		if (rejected.length > 0) {
+			const names = rejected.slice(0, 2).join(', ');
+			const suffix = rejected.length > 2 ? ` 외 ${rejected.length - 2}개` : '';
+			showAttachmentNotice(`${names}${suffix} 파일은 첨부할 수 없습니다.`, 'error');
+		} else if (files.length > 0) {
+			hideAttachmentNotice();
+		}
 	}
 
 	function renderAttachments() {
@@ -524,25 +686,65 @@
 		attachmentList.hidden = attachedFiles.length === 0;
 		attachedFiles.forEach(function (file, index) {
 			const item = document.createElement('li');
+			const type = getFileType(file.name);
+			item.className = `attachment-card ${type.kind}`;
+
+			const badge = document.createElement('span');
+			badge.className = `file-type-badge ${type.kind}`;
+			const mark = document.createElement('span');
+			mark.className = 'file-type-mark';
+			mark.textContent = type.mark;
+			const label = document.createElement('span');
+			label.className = 'file-type-label';
+			label.textContent = type.label;
+			badge.appendChild(mark);
+			badge.appendChild(label);
+
+			const meta = document.createElement('span');
+			meta.className = 'file-meta';
+
 			const nameSpan = document.createElement('span');
 			nameSpan.className = 'file-name';
 			nameSpan.textContent = file.name;
+
 			const sizeSpan = document.createElement('span');
 			sizeSpan.className = 'file-size';
 			sizeSpan.textContent = formatFileSize(file.size);
+
 			const removeButton = document.createElement('button');
 			removeButton.type = 'button';
 			removeButton.textContent = '×';
+			removeButton.title = '첨부 제거';
 			removeButton.addEventListener('click', function () {
 				attachedFiles.splice(index, 1);
 				renderAttachments();
 			});
 
-			item.appendChild(nameSpan);
-			item.appendChild(sizeSpan);
+			meta.appendChild(nameSpan);
+			meta.appendChild(sizeSpan);
+			item.appendChild(badge);
+			item.appendChild(meta);
 			item.appendChild(removeButton);
 			attachmentList.appendChild(item);
 		});
+	}
+
+	function getFileType(fileName) {
+		const extension = (fileName.split('.').pop() || '').toLowerCase();
+		return SUPPORTED_FILE_TYPES[extension] || null;
+	}
+
+	function showAttachmentNotice(message, tone) {
+		attachmentNotice.textContent = message;
+		attachmentNotice.className = `attachment-notice ${tone || 'info'}`;
+		attachmentNotice.hidden = false;
+		window.clearTimeout(showAttachmentNotice.timer);
+		showAttachmentNotice.timer = window.setTimeout(hideAttachmentNotice, 3600);
+	}
+
+	function hideAttachmentNotice() {
+		attachmentNotice.hidden = true;
+		attachmentNotice.textContent = '';
 	}
 
 	function buildUserDisplayText(content) {
@@ -552,7 +754,17 @@
 		const fileText = attachedFiles.map(function (file) {
 			return `- ${file.name} (${formatFileSize(file.size)})`;
 		}).join('\n');
+		if (!content) {
+			return `첨부 파일\n${fileText}`;
+		}
 		return `${content}\n\n첨부 파일\n${fileText}`;
+	}
+
+	function buildAttachmentTitle() {
+		if (attachedFiles.length === 1) {
+			return `${attachedFiles[0].name} 분석`;
+		}
+		return `첨부 파일 ${attachedFiles.length}개 분석`;
 	}
 
 	function formatFileSize(size) {
@@ -642,7 +854,8 @@
 		if (sending) {
 			return;
 		}
-		hidePreview();
+		clearPreviewState({ clearAttachments: true });
+		hideAttachmentNotice();
 		currentChatRoomId = chatRoomId;
 		document.querySelector('.main-header .title').textContent = title;
 		renderRooms(rooms);
@@ -737,19 +950,28 @@
 		attachedFiles = [];
 		messageList.innerHTML = '';
 		setChatting(false);
-		hidePreview();
+		clearPreviewState({ clearAttachments: true });
+		hideAttachmentNotice();
 		messageInput.value = '';
 		resizeComposer();
 		document.querySelector('.main-header .title').textContent = '새 채팅';
 		renderRooms(rooms);
-		renderAttachments();
 	}
 
 	function setSending(value) {
 		sending = value;
-		sendButton.disabled = value;
+		sendButton.disabled = false;
 		previewApproveButton.disabled = value;
-		sendButton.textContent = value ? '...' : '↑';
+		sendButton.textContent = value ? '■' : '↑';
+		sendButton.title = value ? '전송 취소' : '전송';
+		sendButton.classList.toggle('cancel-mode', value);
+	}
+
+	function cancelActiveRequest() {
+		if (activeRequest) {
+			activeRequest.cancelled = true;
+			activeRequest.controller.abort();
+		}
 	}
 
 	function resizeComposer() {

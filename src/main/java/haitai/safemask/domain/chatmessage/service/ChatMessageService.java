@@ -193,8 +193,11 @@ public class ChatMessageService {
 			return baseContent;
 		}
 
-		StringBuilder builder = new StringBuilder(baseContent.isBlank() ? "첨부 파일 내용을 분석해줘." : baseContent);
-		builder.append("\n\n첨부 파일");
+		StringBuilder builder = new StringBuilder();
+		if (!baseContent.isBlank()) {
+			builder.append(baseContent).append("\n\n");
+		}
+		builder.append("첨부 파일");
 		for (MultipartFile file : files) {
 			if (file != null && !file.isEmpty()) {
 				builder.append("\n- ").append(file.getOriginalFilename());
