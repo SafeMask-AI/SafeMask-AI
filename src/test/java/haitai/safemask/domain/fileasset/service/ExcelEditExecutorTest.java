@@ -90,6 +90,60 @@ class ExcelEditExecutorTest {
 	}
 
 	@Test
+	@DisplayName("replace_value는 셀 값의 해당 부분만 바꾸고 서식을 유지한다")
+	void replaceValue() throws IOException {
+		byte[] edited = executor.apply(buildWorkbook(false, false), instruction(
+			new Op("replace_value", "이메일", "b@ex.com", "new@ex.com", null, null, null, null)));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			assertThat(sheet.getRow(1).getCell(2).getStringCellValue()).isEqualTo("new@ex.com");
+			// 값만 바뀌고 셀의 노란 배경 서식은 그대로여야 한다
+			assertThat(sheet.getRow(1).getCell(2).getCellStyle().getFillForegroundColor())
+				.isEqualTo(IndexedColors.YELLOW.getIndex());
+			// 다른 행은 건드리지 않는다
+			assertThat(sheet.getRow(2).getCell(2).getStringCellValue()).isEqualTo("a@ex.com");
+		}
+	}
+
+	@Test
+	@DisplayName("replace_value는 column을 생략하면 표 전체에서 치환한다")
+	void replaceValueWholeSheet() throws IOException {
+		byte[] edited = executor.apply(buildWorkbook(false, false), instruction(
+			new Op("replace_value", null, "박지훈", "박지원", null, null, null, null)));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			assertThat(workbook.getSheetAt(0).getRow(1).getCell(0).getStringCellValue()).isEqualTo("박지원");
+		}
+	}
+
+	@Test
+	@DisplayName("replace_value는 수식·병합 셀이 있는 파일에도 적용된다 (값만 바꾸므로 안전)")
+	void replaceValueAllowsFormulaAndMerge() throws IOException {
+		byte[] tricky = buildWorkbook(true, true);
+
+		byte[] edited = executor.apply(tricky, instruction(
+			new Op("replace_value", "이름", "김민준", "김민서", null, null, null, null)));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			assertThat(sheet.getRow(2).getCell(0).getStringCellValue()).isEqualTo("김민서");
+			// 수식 셀과 병합 구조는 그대로 유지돼야 한다
+			assertThat(sheet.getRow(2).getCell(3).getCellFormula()).isEqualTo("A2");
+			assertThat(sheet.getNumMergedRegions()).isEqualTo(1);
+		}
+	}
+
+	@Test
+	@DisplayName("바꿀 값을 찾지 못하면 조용히 성공하지 않고 이유를 밝히며 거절한다")
+	void replaceValueRejectsWhenNotFound() throws IOException {
+		assertThatThrownBy(() -> executor.apply(buildWorkbook(false, false), instruction(
+			new Op("replace_value", null, "없는값", "새값", null, null, null, null))))
+			.isInstanceOf(UnsupportedEditException.class)
+			.hasMessageContaining("없는값");
+	}
+
+	@Test
 	@DisplayName("수식이 포함된 파일은 수정하지 않고 이유를 밝히며 거절한다")
 	void rejectFormulaFile() throws IOException {
 		byte[] withFormula = buildWorkbook(true, false);

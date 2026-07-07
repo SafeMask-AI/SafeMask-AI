@@ -27,6 +27,7 @@ public record ExcelEditInstruction(
 	 *   <li>rename_column: from, to</li>
 	 *   <li>filter_rows: column + (contains | notContains | equals) 중 하나 — 조건에 맞는 행만 남김</li>
 	 *   <li>sort: column + order(asc|desc, 기본 asc)</li>
+	 *   <li>replace_value: from, to (+ column 선택) — 셀 텍스트 속 from을 to로 치환</li>
 	 * </ul>
 	 */
 	@JsonIgnoreProperties(ignoreUnknown = true)
