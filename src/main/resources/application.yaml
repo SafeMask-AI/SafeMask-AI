@@ -19,6 +19,10 @@ spring:
       ddl-auto: ${JPA_DDL_AUTO:validate}
     properties:
       hibernate:
+        # 주의: dialect를 버전 없이 고정하면 Hibernate가 DB 버전 감지를 건너뛰고
+        # 최신 문법(FETCH FIRST 등)을 생성해, 구버전 Oracle에서 ORA-00933이 납니다.
+        # 이 때문에 리포지토리에서는 findFirst/findTop 같은 LIMIT 파생 쿼리를 쓰지 않는 것이
+        # 프로젝트 규칙입니다. (FileAssetRepository 주석 참고)
         dialect: ${JPA_DATABASE_PLATFORM:org.hibernate.dialect.OracleDialect}
         format_sql: ${JPA_FORMAT_SQL:false}
     show-sql: ${JPA_SHOW_SQL:false}
@@ -32,6 +36,12 @@ spring:
   ai:
     openai:
       api-key: ${OPENAI_API_KEY:}
+      chat:
+        options:
+          # 실제 GPT 호출에 사용하는 모델. 이 설정이 없으면 Spring AI가 자체 기본 모델로
+          # 호출해서, safemask.ai.model(아래, 로그 표기용)과 "기록상 모델 ≠ 실제 호출 모델"
+          # 불일치가 생긴다. 반드시 같은 env(SAFEMASK_AI_MODEL)를 바라봐야 한다.
+          model: ${SAFEMASK_AI_MODEL:gpt-5.5}
 
   servlet:
     multipart:
@@ -52,7 +62,7 @@ server:
 #   FILE_STORAGE_PATH로 프로젝트 밖의 전용 보안 저장소를 지정하세요.
 safemask:
   ai:
-    model: ${SAFEMASK_AI_MODEL:gpt-4o-mini}
+    model: ${SAFEMASK_AI_MODEL:gpt-5.5}
   masking:
     mapping-ttl: ${MASKING_MAPPING_TTL:24h}
   storage:
