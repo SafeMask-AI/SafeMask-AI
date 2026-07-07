@@ -139,15 +139,16 @@ public class GeneratedFileService {
 			return "(파일 수정 지시를 해석하지 못했습니다. 다시 요청해 주세요)";
 		}
 
-		Optional<FileAsset> original = findOriginal(chatRoom, block.targetFileName());
-		if (original.isEmpty()) {
-			return "(수정할 원본 파일을 찾지 못했습니다: " + block.targetFileName() + " — 파일을 다시 첨부해 주세요)";
-		}
-		if (!"xlsx".equals(extensionOf(original.get().getOriginalName()))) {
-			return "(엑셀(xlsx) 파일만 서식 보존 수정을 지원합니다: " + original.get().getOriginalName() + ")";
-		}
-
+		// 원본 조회부터 try 안에 두어, 조회 실패(DB 오류 등)도 블록 단위 실패로 격리한다
 		try {
+			Optional<FileAsset> original = findOriginal(chatRoom, block.targetFileName());
+			if (original.isEmpty()) {
+				return "(수정할 원본 파일을 찾지 못했습니다: " + block.targetFileName() + " — 파일을 다시 첨부해 주세요)";
+			}
+			if (!"xlsx".equals(extensionOf(original.get().getOriginalName()))) {
+				return "(엑셀(xlsx) 파일만 서식 보존 수정을 지원합니다: " + original.get().getOriginalName() + ")";
+			}
+
 			byte[] originalBytes = fileStorageService.load(original.get().getStoredPath());
 			byte[] edited = excelEditExecutor.apply(originalBytes, block.instruction());
 
@@ -165,11 +166,14 @@ public class GeneratedFileService {
 
 	/** 편집 대상 원본 조회: 파일명 일치 → 없으면 채팅방의 최근 업로드 파일로 폴백 */
 	private Optional<FileAsset> findOriginal(ChatRoom chatRoom, String targetFileName) {
+		// 최신순 목록에서 첫 건만 사용 (LIMIT 파생 쿼리의 Oracle 호환 문제 회피 — 리포지토리 주석 참고)
 		return fileAssetRepository
-			.findFirstByChatRoom_IdAndOriginalNameAndStatusOrderByIdDesc(
+			.findByChatRoom_IdAndOriginalNameAndStatusOrderByIdDesc(
 				chatRoom.getId(), targetFileName, FileAssetStatus.UPLOADED)
-			.or(() -> fileAssetRepository.findFirstByChatRoom_IdAndStatusOrderByIdDesc(
-				chatRoom.getId(), FileAssetStatus.UPLOADED));
+			.stream().findFirst()
+			.or(() -> fileAssetRepository.findByChatRoom_IdAndStatusOrderByIdDesc(
+				chatRoom.getId(), FileAssetStatus.UPLOADED)
+				.stream().findFirst());
 	}
 
 	private String resolveResultName(EditBlock block, String originalName) {
@@ -181,7 +185,14 @@ public class GeneratedFileService {
 		return base + "_수정.xlsx";
 	}
 
-	/** 파일 바이트를 스토리지에 저장하고 FileAsset(GENERATED)을 기록한 뒤 안내 문구를 반환합니다. */
+	/**
+	 * 파일 바이트를 스토리지에 저장하고 FileAsset(GENERATED)을 기록한 뒤 안내 문구를 반환합니다.
+	 *
+	 * <p>안내 문구에 이모지(📎 등)를 쓰지 않는 이유: 이모지는 유니코드 보조평면 문자라
+	 * 한글 전용 문자셋(MSWIN949 계열) Oracle에 저장되면 "??"로 파괴됩니다. 이 문구는
+	 * 프런트(chat.js)가 다운로드 버튼을 복원하는 근거이므로, DB를 거쳐도 깨지지 않는
+	 * 문자만 사용해야 합니다. 아이콘 표시는 프런트가 담당합니다.
+	 */
 	private String saveGenerated(ChatRoom chatRoom, String fileName, String extension, byte[] bytes,
 		List<GeneratedFileResponse> files) {
 		String storedPath = fileStorageService.store(bytes, extension);
@@ -189,7 +200,7 @@ public class GeneratedFileService {
 			chatRoom, fileName, storedPath, contentTypeOf(extension), bytes.length));
 
 		files.add(GeneratedFileResponse.from(asset));
-		return "📎 생성된 파일: " + fileName + " (파일번호 " + asset.getId() + ")";
+		return "생성된 파일: " + fileName + " (파일번호 " + asset.getId() + ")";
 	}
 
 	private byte[] toBytes(FileBlock block, String extension) {

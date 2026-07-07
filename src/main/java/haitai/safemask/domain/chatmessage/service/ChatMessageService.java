@@ -74,7 +74,7 @@ public class ChatMessageService {
 		GeneratedFileService generatedFileService,
 		FileAssetService fileAssetService,
 		ChatModel chatModel,
-		@Value("${safemask.ai.model:gpt-4o-mini}") String modelName) {
+		@Value("${safemask.ai.model:gpt-5.5}") String modelName) {
 		this.chatRoomRepository = chatRoomRepository;
 		this.chatMessageRepository = chatMessageRepository;
 		this.aiRunRepository = aiRunRepository;

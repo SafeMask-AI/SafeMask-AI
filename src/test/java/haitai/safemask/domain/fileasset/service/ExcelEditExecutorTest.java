@@ -37,7 +37,7 @@ class ExcelEditExecutorTest {
 		byte[] original = buildWorkbook(false, false);
 
 		byte[] edited = executor.apply(original, instruction(
-			new Op("delete_column", "주민등록번호", null, null, null, null, null, null)));
+			new Op("delete_column", "주민등록번호", null, null, null, null, null, null, null)));
 
 		try (XSSFWorkbook workbook = open(edited)) {
 			Sheet sheet = workbook.getSheetAt(0);
@@ -53,7 +53,7 @@ class ExcelEditExecutorTest {
 	@DisplayName("컬럼 이름을 변경한다")
 	void renameColumn() throws IOException {
 		byte[] edited = executor.apply(buildWorkbook(false, false), instruction(
-			new Op("rename_column", null, "이름", "성명", null, null, null, null)));
+			new Op("rename_column", null, "이름", "성명", null, null, null, null, null)));
 
 		try (XSSFWorkbook workbook = open(edited)) {
 			assertThat(workbook.getSheetAt(0).getRow(0).getCell(0).getStringCellValue()).isEqualTo("성명");
@@ -64,7 +64,7 @@ class ExcelEditExecutorTest {
 	@DisplayName("filter_rows는 조건에 맞는 행만 남긴다")
 	void filterRows() throws IOException {
 		byte[] edited = executor.apply(buildWorkbook(false, false), instruction(
-			new Op("filter_rows", "이름", null, null, "김", null, null, null)));
+			new Op("filter_rows", "이름", null, null, "김", null, null, null, null)));
 
 		try (XSSFWorkbook workbook = open(edited)) {
 			Sheet sheet = workbook.getSheetAt(0);
@@ -77,7 +77,7 @@ class ExcelEditExecutorTest {
 	@DisplayName("sort는 지정 컬럼 기준으로 데이터 행을 정렬하고 행별 서식을 함께 옮긴다")
 	void sortRows() throws IOException {
 		byte[] edited = executor.apply(buildWorkbook(false, false), instruction(
-			new Op("sort", "이름", null, null, null, null, null, "asc")));
+			new Op("sort", "이름", null, null, null, null, null, "asc", null)));
 
 		try (XSSFWorkbook workbook = open(edited)) {
 			Sheet sheet = workbook.getSheetAt(0);
@@ -90,12 +90,111 @@ class ExcelEditExecutorTest {
 	}
 
 	@Test
+	@DisplayName("replace_value는 셀 값의 해당 부분만 바꾸고 서식을 유지한다")
+	void replaceValue() throws IOException {
+		byte[] edited = executor.apply(buildWorkbook(false, false), instruction(
+			new Op("replace_value", "이메일", "b@ex.com", "new@ex.com", null, null, null, null, null)));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			assertThat(sheet.getRow(1).getCell(2).getStringCellValue()).isEqualTo("new@ex.com");
+			// 값만 바뀌고 셀의 노란 배경 서식은 그대로여야 한다
+			assertThat(sheet.getRow(1).getCell(2).getCellStyle().getFillForegroundColor())
+				.isEqualTo(IndexedColors.YELLOW.getIndex());
+			// 다른 행은 건드리지 않는다
+			assertThat(sheet.getRow(2).getCell(2).getStringCellValue()).isEqualTo("a@ex.com");
+		}
+	}
+
+	@Test
+	@DisplayName("replace_value는 column을 생략하면 표 전체에서 치환한다")
+	void replaceValueWholeSheet() throws IOException {
+		byte[] edited = executor.apply(buildWorkbook(false, false), instruction(
+			new Op("replace_value", null, "박지훈", "박지원", null, null, null, null, null)));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			assertThat(workbook.getSheetAt(0).getRow(1).getCell(0).getStringCellValue()).isEqualTo("박지원");
+		}
+	}
+
+	@Test
+	@DisplayName("replace_value는 수식·병합 셀이 있는 파일에도 적용된다 (값만 바꾸므로 안전)")
+	void replaceValueAllowsFormulaAndMerge() throws IOException {
+		byte[] tricky = buildWorkbook(true, true);
+
+		byte[] edited = executor.apply(tricky, instruction(
+			new Op("replace_value", "이름", "김민준", "김민서", null, null, null, null, null)));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			assertThat(sheet.getRow(2).getCell(0).getStringCellValue()).isEqualTo("김민서");
+			// 수식 셀과 병합 구조는 그대로 유지돼야 한다
+			assertThat(sheet.getRow(2).getCell(3).getCellFormula()).isEqualTo("A2");
+			assertThat(sheet.getNumMergedRegions()).isEqualTo(1);
+		}
+	}
+
+	@Test
+	@DisplayName("바꿀 값을 찾지 못하면 조용히 성공하지 않고 이유를 밝히며 거절한다")
+	void replaceValueRejectsWhenNotFound() throws IOException {
+		assertThatThrownBy(() -> executor.apply(buildWorkbook(false, false), instruction(
+			new Op("replace_value", null, "없는값", "새값", null, null, null, null, null))))
+			.isInstanceOf(UnsupportedEditException.class)
+			.hasMessageContaining("없는값");
+	}
+
+	@Test
+	@DisplayName("add_row는 마지막 행 아래에 새 행을 추가하고 기존 행의 서식을 그대로 입힌다")
+	void addRow() throws IOException {
+		byte[] edited = executor.apply(buildWorkbook(false, false), instruction(
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("이서연", "950505-2000000", "c@ex.com"))));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			Row added = sheet.getRow(3);
+			assertThat(added.getCell(0).getStringCellValue()).isEqualTo("이서연");
+			assertThat(added.getCell(2).getStringCellValue()).isEqualTo("c@ex.com");
+			// 바로 위 행(이메일 셀 노란 배경)의 서식이 새 행에도 이어져야 한다
+			assertThat(added.getCell(2).getCellStyle().getFillForegroundColor())
+				.isEqualTo(IndexedColors.YELLOW.getIndex());
+			// 기존 행은 그대로여야 한다
+			assertThat(sheet.getRow(2).getCell(0).getStringCellValue()).isEqualTo("김민준");
+		}
+	}
+
+	@Test
+	@DisplayName("add_row를 여러 번 쓰면 순서대로 아래에 쌓인다")
+	void addMultipleRows() throws IOException {
+		byte[] edited = executor.apply(buildWorkbook(false, false), instruction(
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("이서연", "950505-2000000", "c@ex.com")),
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("최도윤", "970707-1000000", "d@ex.com"))));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			assertThat(sheet.getRow(3).getCell(0).getStringCellValue()).isEqualTo("이서연");
+			assertThat(sheet.getRow(4).getCell(0).getStringCellValue()).isEqualTo("최도윤");
+		}
+	}
+
+	@Test
+	@DisplayName("add_row에 values가 없으면 이유를 밝히며 거절한다")
+	void addRowRequiresValues() throws IOException {
+		assertThatThrownBy(() -> executor.apply(buildWorkbook(false, false), instruction(
+			new Op("add_row", null, null, null, null, null, null, null, null))))
+			.isInstanceOf(UnsupportedEditException.class)
+			.hasMessageContaining("values");
+	}
+
+	@Test
 	@DisplayName("수식이 포함된 파일은 수정하지 않고 이유를 밝히며 거절한다")
 	void rejectFormulaFile() throws IOException {
 		byte[] withFormula = buildWorkbook(true, false);
 
 		assertThatThrownBy(() -> executor.apply(withFormula, instruction(
-			new Op("delete_column", "이름", null, null, null, null, null, null))))
+			new Op("delete_column", "이름", null, null, null, null, null, null, null))))
 			.isInstanceOf(UnsupportedEditException.class)
 			.hasMessageContaining("수식");
 	}
@@ -106,12 +205,12 @@ class ExcelEditExecutorTest {
 		byte[] withMerge = buildWorkbook(false, true);
 
 		assertThatThrownBy(() -> executor.apply(withMerge, instruction(
-			new Op("delete_column", "이름", null, null, null, null, null, null))))
+			new Op("delete_column", "이름", null, null, null, null, null, null, null))))
 			.isInstanceOf(UnsupportedEditException.class)
 			.hasMessageContaining("병합");
 
 		byte[] renamed = executor.apply(withMerge, instruction(
-			new Op("rename_column", null, "이름", "성명", null, null, null, null)));
+			new Op("rename_column", null, "이름", "성명", null, null, null, null, null)));
 		try (XSSFWorkbook workbook = open(renamed)) {
 			assertThat(workbook.getSheetAt(0).getRow(0).getCell(0).getStringCellValue()).isEqualTo("성명");
 		}
@@ -121,7 +220,7 @@ class ExcelEditExecutorTest {
 	@DisplayName("존재하지 않는 컬럼을 지정하면 이유를 밝히며 거절한다")
 	void rejectUnknownColumn() throws IOException {
 		assertThatThrownBy(() -> executor.apply(buildWorkbook(false, false), instruction(
-			new Op("delete_column", "없는컬럼", null, null, null, null, null, null))))
+			new Op("delete_column", "없는컬럼", null, null, null, null, null, null, null))))
 			.isInstanceOf(UnsupportedEditException.class)
 			.hasMessageContaining("없는컬럼");
 	}

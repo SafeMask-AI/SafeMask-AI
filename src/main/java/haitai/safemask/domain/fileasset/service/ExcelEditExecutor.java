@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.CellType;
@@ -28,16 +29,23 @@ import org.springframework.stereotype.Component;
  * 셀 스타일 객체를 그대로 옮겨 붙이는 방식이라, 지시가 건드리지 않은
  * 서식(색상, 글꼴, 테두리, 열 너비, 행 높이 등)은 결과 파일에 그대로 보존됩니다.
  *
- * <p>v1은 서식을 깨뜨릴 위험이 낮은 4개 연산만 지원합니다:
- * delete_column / rename_column / filter_rows / sort.
+ * <p>서식을 깨뜨릴 위험이 낮은 6개 연산을 지원합니다:
+ * delete_column / rename_column / filter_rows / sort / replace_value / add_row.
  * 결과 신뢰를 지키기 위해, 안전하게 처리할 수 없는 파일은 어설프게 수정하지 않고
- * {@link UnsupportedEditException}으로 거절합니다. (수식 포함, 병합 셀 등)
+ * {@link UnsupportedEditException}으로 거절합니다. (셀 위치를 옮기는 연산 + 수식·병합 셀 파일)
  */
 @Component
 public class ExcelEditExecutor {
 
 	/** 데이터가 시작되는 행 인덱스 (0행은 헤더로 간주) */
 	private static final int FIRST_DATA_ROW = 1;
+
+	/**
+	 * 기존 셀의 "위치"를 옮기지 않는 연산들. (값 변경 또는 마지막 행 아래 추가)
+	 * 수식 참조나 병합 구조를 깨뜨릴 수 없으므로, 구조 이동 연산과 달리
+	 * 수식·병합 셀이 있는 파일에도 안전하게 적용할 수 있습니다.
+	 */
+	private static final Set<String> NON_STRUCTURAL_OPS = Set.of("rename_column", "replace_value", "add_row");
 
 	private final DataFormatter formatter = new DataFormatter();
 
@@ -80,22 +88,28 @@ public class ExcelEditExecutor {
 			throw new UnsupportedEditException("적용할 편집 내용이 없습니다");
 		}
 
+		// 셀 위치를 옮기지 않는 연산(이름 변경, 값 치환, 행 추가)은 수식·병합을
+		// 깨뜨릴 수 없으므로 파일 상태와 무관하게 허용한다. (실사용 수정 요청의 대부분)
+		boolean nonStructural = instruction.ops().stream()
+			.allMatch(op -> op != null && NON_STRUCTURAL_OPS.contains(op.op()));
+		if (nonStructural) {
+			return;
+		}
+
 		// 열 삭제·행 이동은 수식의 셀 참조를 깨뜨린다(#REF!). 값만 있는 파일만 지원.
 		for (Row row : sheet) {
 			for (Cell cell : row) {
 				if (cell.getCellType() == CellType.FORMULA) {
 					throw new UnsupportedEditException(
-						"수식이 포함된 파일은 아직 자동 수정할 수 없습니다. 새 파일로 정리를 요청해 주세요");
+						"수식이 포함된 파일은 열 삭제·행 이동을 자동 수정할 수 없습니다. 새 파일로 정리를 요청해 주세요");
 				}
 			}
 		}
 
-		// 병합 셀 위로 열/행을 이동시키면 병합 구조가 깨진다. 이름 변경만이면 허용.
-		boolean onlyRename = instruction.ops().stream()
-			.allMatch(op -> "rename_column".equals(op.op()));
-		if (!onlyRename && sheet.getNumMergedRegions() > 0) {
+		// 병합 셀 위로 열/행을 이동시키면 병합 구조가 깨진다.
+		if (sheet.getNumMergedRegions() > 0) {
 			throw new UnsupportedEditException(
-				"병합된 셀이 있는 파일은 아직 자동 수정할 수 없습니다. 새 파일로 정리를 요청해 주세요");
+				"병합된 셀이 있는 파일은 열 삭제·행 이동을 자동 수정할 수 없습니다. 새 파일로 정리를 요청해 주세요");
 		}
 	}
 
@@ -108,6 +122,8 @@ public class ExcelEditExecutor {
 			case "rename_column" -> renameColumn(sheet, op);
 			case "filter_rows" -> filterRows(sheet, op);
 			case "sort" -> sortRows(sheet, op);
+			case "replace_value" -> replaceValue(sheet, op);
+			case "add_row" -> addRow(sheet, op);
 			default -> throw new UnsupportedEditException("지원하지 않는 편집 지시입니다: " + op.op());
 		}
 	}
@@ -208,6 +224,98 @@ public class ExcelEditExecutor {
 			return !value.contains(op.notContains().trim());
 		}
 		return value.equals(op.equals().trim());
+	}
+
+	/**
+	 * 셀 값 치환: 텍스트에 from이 포함된 셀을 찾아 그 부분만 to로 바꿉니다.
+	 * 기존 셀 객체에 값만 다시 쓰므로 스타일·위치가 완전히 보존됩니다.
+	 * (셀 값 변경·오타 수정 요청이 파일 재생성으로 빠져 서식이 사라지는 문제의 해결책)
+	 *
+	 * <p>column이 지정되면 해당 컬럼만, 없으면 시트 전체를 대상으로 합니다.
+	 * 서버가 원본의 실제 값으로 실행하므로 마스킹 토큰 조건도 정확히 동작합니다.
+	 */
+	private void replaceValue(Sheet sheet, Op op) {
+		if (op.from() == null || op.from().isBlank() || op.to() == null) {
+			throw new UnsupportedEditException("값 치환에는 from(찾을 값)과 to(바꿀 값)가 모두 필요합니다");
+		}
+		Integer columnIndex = op.column() == null || op.column().isBlank()
+			? null : requireColumn(sheet, op.column());
+		String from = op.from().trim();
+		String to = op.to().trim();
+
+		int replacedCount = 0;
+		for (Row row : sheet) {
+			for (Cell cell : row) {
+				if (columnIndex != null && cell.getColumnIndex() != columnIndex) {
+					continue;
+				}
+				// 수식 셀의 "표시값"을 문자열로 덮으면 수식이 사라지므로 건드리지 않는다
+				if (cell.getCellType() == CellType.FORMULA) {
+					continue;
+				}
+				String text = formatter.formatCellValue(cell);
+				if (!text.contains(from)) {
+					continue;
+				}
+				writeReplacedValue(cell, text.replace(from, to));
+				replacedCount++;
+			}
+		}
+
+		// 못 찾았는데 조용히 성공하면 사용자가 "바뀐 파일"로 오해한다. 이유를 밝히고 거절.
+		if (replacedCount == 0) {
+			throw new UnsupportedEditException("바꿀 값 '" + from + "'을(를) 파일에서 찾지 못했습니다");
+		}
+	}
+
+	/**
+	 * 행 추가: 마지막 데이터 행 아래에 새 행을 만듭니다.
+	 * 바로 위 행(마지막 데이터 행)의 셀 서식·행 높이를 그대로 입혀서,
+	 * 사용자가 꾸며놓은 표에 "원래 있던 행처럼" 자연스럽게 이어지게 합니다.
+	 * (행 추가 요청이 파일 재생성으로 빠져 디자인이 사라지는 문제의 해결책)
+	 */
+	private void addRow(Sheet sheet, Op op) {
+		if (op.values() == null || op.values().isEmpty()) {
+			throw new UnsupportedEditException("행 추가에는 values(셀 값 목록)가 필요합니다");
+		}
+
+		// 서식 본보기는 바로 위 행. add_row를 연속 사용하면 직전에 추가된 행이 본보기가 된다.
+		Row template = sheet.getRow(sheet.getLastRowNum());
+		Row row = sheet.createRow(sheet.getLastRowNum() + 1);
+		if (template != null) {
+			row.setHeight(template.getHeight());
+		}
+
+		for (int c = 0; c < op.values().size(); c++) {
+			Cell cell = row.createCell(c);
+			Cell templateCell = template == null ? null : template.getCell(c);
+			if (templateCell != null) {
+				cell.setCellStyle(templateCell.getCellStyle());
+			}
+
+			String value = op.values().get(c) == null ? "" : op.values().get(c).trim();
+			// 본보기 셀이 숫자면 새 값도 숫자로 저장해 정렬·계산 호환을 지킨다
+			if (templateCell != null && templateCell.getCellType() == CellType.NUMERIC) {
+				Double number = tryParseNumber(value);
+				if (number != null) {
+					cell.setCellValue(number);
+					continue;
+				}
+			}
+			cell.setCellValue(value);
+		}
+	}
+
+	/** 숫자 셀이 숫자로 유지될 수 있으면 숫자 타입으로 다시 써서 엑셀 수식·정렬 호환을 지킵니다. */
+	private void writeReplacedValue(Cell cell, String newText) {
+		if (cell.getCellType() == CellType.NUMERIC) {
+			Double number = tryParseNumber(newText);
+			if (number != null) {
+				cell.setCellValue(number);
+				return;
+			}
+		}
+		cell.setCellValue(newText);
 	}
 
 	private void removeRow(Sheet sheet, int rowIndex) {
