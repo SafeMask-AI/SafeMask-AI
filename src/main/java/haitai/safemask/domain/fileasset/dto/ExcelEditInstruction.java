@@ -28,6 +28,7 @@ public record ExcelEditInstruction(
 	 *   <li>filter_rows: column + (contains | notContains | equals) 중 하나 — 조건에 맞는 행만 남김</li>
 	 *   <li>sort: column + order(asc|desc, 기본 asc)</li>
 	 *   <li>replace_value: from, to (+ column 선택) — 셀 텍스트 속 from을 to로 치환</li>
+	 *   <li>add_row: values — 마지막 데이터 행 아래에 새 행 추가 (기존 행 서식을 그대로 입힘)</li>
 	 * </ul>
 	 */
 	@JsonIgnoreProperties(ignoreUnknown = true)
@@ -39,7 +40,8 @@ public record ExcelEditInstruction(
 		String contains,
 		String notContains,
 		String equals,
-		String order
+		String order,
+		List<String> values
 	) {
 	}
 }

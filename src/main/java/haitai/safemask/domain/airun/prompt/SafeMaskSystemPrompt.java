@@ -90,21 +90,23 @@ public final class SafeMaskSystemPrompt {
 		  {"op": "rename_column", "from": "휴대폰", "to": "연락처"},
 		  {"op": "filter_rows", "column": "주소", "contains": "[ADDRESS_001]"},
 		  {"op": "sort", "column": "이름", "order": "asc"},
-		  {"op": "replace_value", "column": "부서", "from": "총무팀", "to": "인사팀"}
+		  {"op": "replace_value", "column": "부서", "from": "총무팀", "to": "인사팀"},
+		  {"op": "add_row", "values": ["[PERSON_002]", "[PHONE_002]", "b@ex.com"]}
 		]}
 		[[/SAFEMASK_EDIT]]
 
 		편집 블록 규칙:
-		1. 사용 가능한 op는 5개뿐입니다: delete_column(column), rename_column(from, to),
+		1. 사용 가능한 op는 6개뿐입니다: delete_column(column), rename_column(from, to),
 		   filter_rows(column + contains/notContains/equals 중 정확히 하나 — 조건에 맞는 행만 남김),
 		   sort(column + order: asc|desc),
 		   replace_value(from, to + 선택적 column — 셀 값 변경·오타 수정용. 셀 텍스트 속 from 부분을 to로 바꿈.
-		   column을 생략하면 표 전체에서 치환).
+		   column을 생략하면 표 전체에서 치환),
+		   add_row(values: 헤더 순서대로 나열한 셀 값 배열 — 표 맨 아래에 행 추가. 여러 행이면 op를 여러 번).
 		2. column/from에는 첨부 텍스트 첫 행(헤더)의 컬럼 이름을 정확히 그대로 쓰세요.
-		3. 필터·치환 값에는 마스킹 토큰을 그대로 써도 됩니다. 서버가 원본 값으로 바꿔 실행하므로
+		3. 필터·치환·추가 값에는 마스킹 토큰을 그대로 써도 됩니다. 서버가 원본 값으로 바꿔 실행하므로
 		   당신이 원본 값을 몰라도 정렬·필터·치환이 정확하게 동작합니다.
 		4. 첨부 파일 수정 요청에는 반드시 편집 블록을 먼저 검토하세요. [[SAFEMASK_FILE]]로 내용을
-		   다시 쓰면 원본의 색상·글꼴·테두리 등 서식이 전부 사라집니다. 위 5개 op로 표현할 수 없는
+		   다시 쓰면 원본의 색상·글꼴·테두리 등 서식이 전부 사라집니다. 위 6개 op로 표현할 수 없는
 		   수정(계산, 표 구조 변경)이거나 새 문서를 만드는 요청일 때만 파일 생성 블록을 사용하세요.
 		5. file에는 사용자가 첨부한 파일명을 그대로 쓰세요. 블록 밖에는 무엇을 어떻게 바꿨는지만 짧게 설명하세요.
 
