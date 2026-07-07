@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 서비스 전역 예외를 한 곳에서 처리하는 클래스입니다.
@@ -108,6 +109,26 @@ public class GlobalExceptionHandler {
 		}
 
 		addErrorAttributes(model, errorCode, message, request.getRequestURI());
+		return ERROR_VIEW;
+	}
+
+	/**
+	 * 존재하지 않는 정적 리소스 요청(브라우저가 자동으로 요청하는 favicon.ico 등)을 처리합니다.
+	 *
+	 * 예상 가능한 단순 404이므로, 아래의 최종 핸들러(Exception)로 흘러가
+	 * ERROR 레벨 스택트레이스로 로그를 오염시키지 않도록 앞에서 가로챕니다.
+	 */
+	@ExceptionHandler(NoResourceFoundException.class)
+	public Object handleNoResourceFound(NoResourceFoundException exception, HttpServletRequest request, Model model) {
+		ErrorCode errorCode = ErrorCode.NOT_FOUND;
+
+		if (isApiRequest(request)) {
+			return ResponseEntity
+				.status(errorCode.getStatus())
+				.body(ErrorResponse.of(errorCode, errorCode.getMessage(), request.getRequestURI()));
+		}
+
+		addErrorAttributes(model, errorCode, errorCode.getMessage(), request.getRequestURI());
 		return ERROR_VIEW;
 	}
 

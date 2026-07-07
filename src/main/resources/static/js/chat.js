@@ -242,16 +242,23 @@
 
 		const bubble = document.createElement('div');
 		bubble.className = 'message-bubble';
-		bubble.textContent = text;
+		if (role === 'assistant') {
+			// AI 답변만 마크다운으로 렌더링. 사용자/시스템 메시지는 입력 원문 그대로 표시
+			renderAssistantBubble(bubble, text);
+		} else {
+			bubble.textContent = text;
+		}
 
 		body.appendChild(author);
 		body.appendChild(bubble);
 		if (role === 'assistant') {
 			attachGeneratedFileCards(body, text);
+			attachAssistantActions(row, body, text);
 		}
 		row.appendChild(avatar);
 		row.appendChild(body);
 		messageList.appendChild(row);
+		updateRegenerateVisibility();
 		messageList.scrollTop = messageList.scrollHeight;
 		return row;
 	}
@@ -431,7 +438,11 @@
 
 		await typeTextIntoBubble(bubble, text);
 		if (role === 'assistant') {
+			// 타이핑 연출은 원문으로 하고, 끝나면 서식 있는 마크다운 화면으로 전환
+			renderAssistantBubble(bubble, text);
 			attachGeneratedFileCards(body, text);
+			attachAssistantActions(row, body, text);
+			updateRegenerateVisibility();
 		}
 		messageList.scrollTop = messageList.scrollHeight;
 	}
@@ -454,21 +465,52 @@
 		bubble.className = 'message-bubble';
 		body.replaceChild(bubble, statusBubble);
 		await typeTextIntoBubble(bubble, text, shouldCancel);
+		// 타이핑 연출은 원문으로 하고, 끝나면 서식 있는 마크다운 화면으로 전환
+		renderAssistantBubble(bubble, text);
 		attachGeneratedFileCards(body, text);
+		attachAssistantActions(row, body, text);
+		updateRegenerateVisibility();
 		messageList.scrollTop = messageList.scrollHeight;
 	}
 
 	async function typeTextIntoBubble(bubble, text, shouldCancel) {
-		const baseDelay = text.length > 900 ? 8 : text.length > 450 ? 14 : 20;
+		// 2글자마다 짧게 쉬어 글자가 뭉텅이로 붙지 않는 고른 리듬을 만든다
+		const baseDelay = text.length > 900 ? 4 : text.length > 450 ? 8 : 14;
+		bubble.classList.add('markdown');
+
+		// 떨림(렉) 방지 구조: 매 글자마다 전체를 다시 렌더링하면 표·코드블록 DOM이
+		// 통째로 갈리면서 화면이 떨린다. 대신 "완성된 줄까지"는 마크다운으로 한 번만
+		// 그려 고정(stable)하고, 지금 흘러나오는 줄(tail)만 글자를 덧붙인다.
+		// 전체 재렌더링은 줄바꿈 순간에만 일어나므로 타이핑이 부드럽다.
+		const stable = document.createElement('div');
+		const tail = document.createElement('span');
+		tail.className = 'typing-tail';
+		bubble.textContent = '';
+		bubble.appendChild(stable);
+		bubble.appendChild(tail);
+
+		let flushedLength = 0; // stable에 반영이 끝난 텍스트 길이
 		for (let i = 0; i < text.length; i += 1) {
 			if (shouldCancel && shouldCancel()) {
 				throw new DOMException('Aborted', 'AbortError');
 			}
 			const char = text.charAt(i);
-			bubble.textContent += char;
+
+			if (char === '\n') {
+				// 줄이 완성된 순간에만 완성분 전체를 마크다운으로 다시 그린다
+				stable.innerHTML = renderMarkdown(text.slice(0, i + 1));
+				tail.textContent = '';
+				flushedLength = i + 1;
+			} else {
+				tail.textContent = text.slice(flushedLength, i + 1);
+			}
+
 			const punctuationPause = /[.!?。！？\n]/.test(char);
-			if (punctuationPause || (i > 0 && i % 8 === 0)) {
-				messageList.scrollTop = messageList.scrollHeight;
+			if (punctuationPause || i % 2 === 0) {
+				// 스크롤 강제 계산도 떨림 원인이라 문장 경계에서만 내린다
+				if (punctuationPause) {
+					messageList.scrollTop = messageList.scrollHeight;
+				}
 				await sleep(punctuationPause ? baseDelay * 5 : baseDelay);
 			}
 		}
@@ -478,6 +520,310 @@
 		return new Promise(function (resolve) {
 			window.setTimeout(resolve, ms);
 		});
+	}
+
+	// ==== AI 답변 마크다운 렌더링 ====
+	// GPT 답변의 표·코드블록·굵게 같은 서식을 챗지피티처럼 보여주기 위한 자체 경량 렌더러.
+	// 외부 라이브러리 무의존(사내망 배포 고려). 보안이 최우선이므로 반드시 전체 텍스트를
+	// HTML 이스케이프한 "뒤에" 제한된 마크다운 문법만 태그로 바꾼다 — 답변에 <script> 같은
+	// HTML이 섞여 있어도 문자 그대로 표시될 뿐 절대 실행되지 않는다(XSS 방지).
+
+	function escapeHtml(text) {
+		return text
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
+	}
+
+	/** 한 줄 안의 인라인 문법(코드/굵게/기울임/링크)을 변환한다. 입력은 이미 이스케이프된 텍스트 */
+	function renderInline(text) {
+		// 인라인 코드 안의 **, * 가 굵게/기울임으로 오변환되지 않도록 먼저 자리표시자로 격리
+		const codeSpans = [];
+		let out = text.replace(/`([^`]+)`/g, function (match, code) {
+			codeSpans.push(code);
+			return '\u0000' + (codeSpans.length - 1) + '\u0000';
+		});
+		out = out
+			.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+			.replace(/\*([^*\s][^*]*)\*/g, '<em>$1</em>')
+			// 링크는 http(s)만 허용 — javascript: 같은 위험 스킴 차단
+			.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+				'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+		return out.replace(/\u0000(\d+)\u0000/g, function (match, index) {
+			return '<code>' + codeSpans[Number(index)] + '</code>';
+		});
+	}
+
+	/** 표의 한 행("| a | b |")을 셀 배열로 나눈다 */
+	function splitTableRow(line) {
+		return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')
+			.map(function (cell) { return cell.trim(); });
+	}
+
+	/** 다음 줄이 새 블록(코드펜스/제목/목록/구분선/표)의 시작인지 — 문단 묶기의 경계 판정용 */
+	function isBlockStart(line, nextLine) {
+		return /^```/.test(line.trim())
+			|| /^#{1,6}\s+/.test(line)
+			|| /^\s*[-*]\s+/.test(line)
+			|| /^\s*\d+\.\s+/.test(line)
+			|| /^\s*(---+|\*\*\*+)\s*$/.test(line)
+			|| (line.includes('|') && nextLine !== undefined && isTableSeparator(nextLine));
+	}
+
+	function isTableSeparator(line) {
+		return line.includes('-') && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(line);
+	}
+
+	/** 마크다운 텍스트를 안전한 HTML 문자열로 변환한다 */
+	function renderMarkdown(rawText) {
+		const lines = escapeHtml(rawText || '').split('\n');
+		const html = [];
+		let i = 0;
+
+		while (i < lines.length) {
+			const line = lines[i];
+
+			// 코드블록: ``` ... ``` (내용은 이스케이프된 원문 그대로)
+			if (/^```/.test(line.trim())) {
+				const code = [];
+				i += 1;
+				while (i < lines.length && !/^```/.test(lines[i].trim())) {
+					code.push(lines[i]);
+					i += 1;
+				}
+				i += 1; // 닫는 펜스 소비
+				html.push('<pre><code>' + code.join('\n') + '</code></pre>');
+				continue;
+			}
+
+			// 표: 헤더 행 + 구분 행(|---|---|) 조합일 때만 표로 인식
+			if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+				const headers = splitTableRow(line);
+				i += 2;
+				const rows = [];
+				while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+					rows.push(splitTableRow(lines[i]));
+					i += 1;
+				}
+				let table = '<table><thead><tr>';
+				headers.forEach(function (cell) { table += '<th>' + renderInline(cell) + '</th>'; });
+				table += '</tr></thead><tbody>';
+				rows.forEach(function (cells) {
+					table += '<tr>';
+					cells.forEach(function (cell) { table += '<td>' + renderInline(cell) + '</td>'; });
+					table += '</tr>';
+				});
+				table += '</tbody></table>';
+				html.push(table);
+				continue;
+			}
+
+			// 제목 (#, ##, ...)
+			const heading = line.match(/^(#{1,6})\s+(.*)$/);
+			if (heading) {
+				const level = heading[1].length;
+				html.push('<h' + level + '>' + renderInline(heading[2]) + '</h' + level + '>');
+				i += 1;
+				continue;
+			}
+
+			// 구분선
+			if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) {
+				html.push('<hr>');
+				i += 1;
+				continue;
+			}
+
+			// 목록 (순서 있는/없는)
+			if (/^\s*[-*]\s+/.test(line) || /^\s*\d+\.\s+/.test(line)) {
+				const ordered = /^\s*\d+\.\s+/.test(line);
+				const itemPattern = ordered ? /^\s*\d+\.\s+/ : /^\s*[-*]\s+/;
+				const items = [];
+				while (i < lines.length && itemPattern.test(lines[i])) {
+					items.push('<li>' + renderInline(lines[i].replace(itemPattern, '')) + '</li>');
+					i += 1;
+				}
+				html.push((ordered ? '<ol>' : '<ul>') + items.join('') + (ordered ? '</ol>' : '</ul>'));
+				continue;
+			}
+
+			// 빈 줄은 문단 경계
+			if (line.trim() === '') {
+				i += 1;
+				continue;
+			}
+
+			// 일반 문단: 연속된 줄을 <br>로 이어 한 문단으로 묶는다
+			const paragraph = [];
+			while (i < lines.length && lines[i].trim() !== '' && !isBlockStart(lines[i], lines[i + 1])) {
+				paragraph.push(renderInline(lines[i]));
+				i += 1;
+			}
+			if (paragraph.length === 0) {
+				// 문단 시작 줄 자체가 블록 시작으로 판정된 경우 무한루프 방지
+				paragraph.push(renderInline(lines[i]));
+				i += 1;
+			}
+			html.push('<p>' + paragraph.join('<br>') + '</p>');
+		}
+		return html.join('');
+	}
+
+	/** AI 답변 말풍선을 마크다운 렌더링 결과로 채운다 */
+	function renderAssistantBubble(bubble, text) {
+		bubble.classList.add('markdown');
+		bubble.innerHTML = renderMarkdown(text);
+	}
+
+	// ==== AI 답변 편의 버튼 (복사 / 다시 생성) ====
+
+	// 챗지피티처럼 텍스트 대신 아이콘 버튼을 쓴다. (title 속성으로 툴팁 제공)
+	const COPY_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+		+ ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+		+ '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+	const CHECK_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+		+ ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+		+ '<polyline points="20 6 9 17 4 12"/></svg>';
+	const REGEN_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+		+ ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+		+ '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>';
+
+	/** AI 답변 아래에 복사·다시 생성 아이콘 버튼 줄을 붙인다 */
+	function attachAssistantActions(row, body, text) {
+		// 재생성으로 말풍선을 다시 그릴 때 중복으로 붙지 않게 기존 버튼 줄은 제거
+		const existing = body.querySelector('.message-actions');
+		if (existing) {
+			existing.remove();
+		}
+
+		const actions = document.createElement('div');
+		actions.className = 'message-actions';
+
+		const copyButton = document.createElement('button');
+		copyButton.type = 'button';
+		copyButton.className = 'message-action-button';
+		copyButton.title = '복사';
+		copyButton.setAttribute('aria-label', '답변 복사');
+		copyButton.innerHTML = COPY_ICON;
+		copyButton.addEventListener('click', function () {
+			copyAnswerText(text, copyButton);
+		});
+
+		const regenButton = document.createElement('button');
+		regenButton.type = 'button';
+		regenButton.className = 'message-action-button regen-button';
+		regenButton.title = '다시 생성';
+		regenButton.setAttribute('aria-label', '답변 다시 생성');
+		regenButton.innerHTML = REGEN_ICON;
+		regenButton.addEventListener('click', function () {
+			regenerateLastAnswer(row);
+		});
+
+		actions.appendChild(copyButton);
+		actions.appendChild(regenButton);
+		body.appendChild(actions);
+	}
+
+	/** 다시 생성 버튼은 "마지막 AI 답변"에만 보여준다 (중간 답변 재생성은 맥락이 꼬임) */
+	function updateRegenerateVisibility() {
+		const assistantRows = messageList.querySelectorAll('.message-row.assistant:not(.status)');
+		assistantRows.forEach(function (assistantRow, index) {
+			const regenButton = assistantRow.querySelector('.regen-button');
+			if (regenButton) {
+				regenButton.hidden = index !== assistantRows.length - 1;
+			}
+		});
+	}
+
+	/** 답변 원문(마크다운 기호 포함)을 클립보드로 복사한다 */
+	async function copyAnswerText(text, button) {
+		try {
+			if (navigator.clipboard && navigator.clipboard.writeText) {
+				await navigator.clipboard.writeText(text);
+			} else {
+				// 사내망 HTTP 환경 등 clipboard API가 없을 때의 폴백
+				const textarea = document.createElement('textarea');
+				textarea.value = text;
+				document.body.appendChild(textarea);
+				textarea.select();
+				document.execCommand('copy');
+				textarea.remove();
+			}
+			// 복사 성공 피드백: 아이콘을 잠시 체크 표시로 바꾼다
+			button.innerHTML = CHECK_ICON;
+			button.classList.add('copied');
+			window.setTimeout(function () {
+				button.innerHTML = COPY_ICON;
+				button.classList.remove('copied');
+			}, 1500);
+		} catch (error) {
+			appendMessage('system', '복사하지 못했습니다. 텍스트를 직접 선택해 복사해 주세요.');
+		}
+	}
+
+	/**
+	 * 마지막 AI 답변을 서버에서 지우고 같은 맥락으로 다시 생성한다.
+	 *
+	 * <p>기존 답변은 클릭 즉시 화면에서 걷어내고 그 자리에서 "다시 생성하는 중" 상태로
+	 * 전환한다. (아래에 새 말풍선이 하나 더 생겨 답변이 2개로 보이는 문제 방지)
+	 * 실패하면 걷어냈던 기존 답변을 제자리에 복구한다 — 서버도 실패 시 트랜잭션이
+	 * 롤백되어 기존 답변을 유지하므로 화면과 어긋나지 않는다.
+	 */
+	async function regenerateLastAnswer(row) {
+		if (sending || !currentChatRoomId) {
+			return;
+		}
+		setSending(true);
+		const requestState = {
+			controller: new AbortController(),
+			cancelled: false
+		};
+		activeRequest = requestState;
+
+		// 기존 답변을 즉시 걷어내고, 그 자리에서 생각하는 상태로 전환
+		removeMessageRow(row);
+		const statusRow = appendStatusMessage('답변을 다시 생성하는 중...');
+
+		try {
+			const response = await fetch('/api/chat/messages/regenerate', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${accessToken}`
+				},
+				body: JSON.stringify({ chatRoomId: currentChatRoomId }),
+				signal: requestState.controller.signal
+			});
+			if (response.status === 401) {
+				forceLogout();
+				return;
+			}
+			const data = await readResponseBody(response);
+			if (!response.ok) {
+				throw new Error(data.message || '답변을 다시 생성하지 못했습니다.');
+			}
+
+			await replaceStatusWithTypingMessage(statusRow, data.assistantContent || '', function () {
+				return requestState.cancelled;
+			});
+		} catch (error) {
+			removeMessageRow(statusRow);
+			// 실패·취소 시 걷어냈던 기존 답변을 먼저 제자리에 복구하고 (서버는 롤백되어 그대로임)
+			// 그 아래에 오류 안내를 붙인다
+			messageList.appendChild(row);
+			updateRegenerateVisibility();
+			messageList.scrollTop = messageList.scrollHeight;
+			if (error.name !== 'AbortError') {
+				appendMessage('system', resolveRequestErrorMessage(error));
+			}
+		} finally {
+			if (activeRequest === requestState) {
+				activeRequest = null;
+			}
+			setSending(false);
+		}
 	}
 
 	// 서버(GeneratedFileService)가 응답 본문에 남기는 파일 안내 문구 형식.

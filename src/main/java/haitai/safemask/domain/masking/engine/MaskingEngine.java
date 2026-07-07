@@ -52,13 +52,38 @@ public class MaskingEngine {
 	private final Map<String, Optional<Pattern>> patternCache = new ConcurrentHashMap<>();
 
 	/**
+	 * 규칙이 찾은 매칭을 최종 탐지로 인정할지 판정하는 필터입니다.
+	 *
+	 * <p>정규식만으로 표현할 수 없는 판정(이름 후보의 사전 검증, 카드번호 체크섬,
+	 * 매칭 앞 문맥 확인 등)을 호출부가 주입할 수 있게 합니다.
+	 * 엔진은 사전·DB를 모르는 순수 구조를 유지합니다.
+	 */
+	@FunctionalInterface
+	public interface DetectionFilter {
+
+		/**
+		 * true를 반환한 매칭만 탐지로 확정됩니다.
+		 *
+		 * @param start 원문에서 매칭이 시작되는 인덱스 (앞 문맥 검사용)
+		 */
+		boolean accept(MaskingRule rule, String value, int start);
+	}
+
+	/** 필터 없이 모든 매칭을 인정하는 기본 동작 (필터가 필요 없는 호출부·테스트용) */
+	public MaskingResult mask(String text, List<MaskingRule> rules, TokenAssigner tokenAssigner) {
+		return mask(text, rules, tokenAssigner, (rule, value, start) -> true);
+	}
+
+	/**
 	 * 활성 규칙들을 우선순위 순으로 적용해 텍스트를 마스킹합니다.
 	 *
-	 * @param text          마스킹할 원문
-	 * @param rules         적용할 규칙 (우선순위 오름차순으로 정렬된 상태여야 함)
-	 * @param tokenAssigner 토큰 발급기 (운영: Redis, 테스트: 인메모리)
+	 * @param text            마스킹할 원문
+	 * @param rules           적용할 규칙 (우선순위 오름차순으로 정렬된 상태여야 함)
+	 * @param tokenAssigner   토큰 발급기 (운영: Redis, 테스트: 인메모리)
+	 * @param detectionFilter 매칭 확정 전 최종 판정 필터 (예: 이름 사전 검증)
 	 */
-	public MaskingResult mask(String text, List<MaskingRule> rules, TokenAssigner tokenAssigner) {
+	public MaskingResult mask(String text, List<MaskingRule> rules, TokenAssigner tokenAssigner,
+		DetectionFilter detectionFilter) {
 		List<Detection> detections = new ArrayList<>();
 
 		for (MaskingRule rule : rules) {
@@ -78,6 +103,10 @@ public class MaskingEngine {
 				}
 
 				String value = matcher.group();
+				// 필터가 거부한 매칭은 탐지로 인정하지 않는다 (토큰 발급 전에 거른다)
+				if (!detectionFilter.accept(rule, value, matcher.start())) {
+					continue;
+				}
 				String token = tokenAssigner.assign(rule.getType(), value);
 				detections.add(new Detection(rule.getType(), value, token, matcher.start(), matcher.end()));
 			}

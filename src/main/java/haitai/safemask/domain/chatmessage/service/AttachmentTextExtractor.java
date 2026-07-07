@@ -5,13 +5,14 @@ import haitai.safemask.global.exception.ErrorCode;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.extractor.WordExtractor;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.springframework.stereotype.Component;
@@ -24,16 +25,15 @@ import org.springframework.web.multipart.MultipartFile;
  * GPT로 전달됩니다. 즉, Word/Excel 파일 안의 이름·전화번호·계좌번호도 먼저 토큰으로 치환된 다음
  * 모델에 전달됩니다.
  *
- * <p>txt/csv는 UTF-8 텍스트로 바로 읽고, xlsx는 최소 XML 파서로 셀 값을 추출합니다.
- * Word 문서는 문단·표·머리글 같은 구조가 여러 XML/바이너리 스트림에 나뉘어 있으므로
- * Apache POI 전용 추출기를 사용합니다. PDF는 아직 본문 추출기를 연결하지 않았기 때문에
+ * <p>txt/csv는 UTF-8 텍스트로 바로 읽고, Office 문서(xlsx/doc/docx)는 Apache POI로 추출합니다.
+ * 추출 실패는 곧 "민감정보가 탐지 없이 누락"되는 보안 문제이므로, 형식 변형에 강한
+ * 표준 파서를 사용하는 것이 원칙입니다. PDF는 아직 본문 추출기를 연결하지 않았기 때문에
  * 파일명/크기 안내만 전달합니다.
  */
 @Component
 public class AttachmentTextExtractor {
 
 	private static final int MAX_EXTRACTED_CHARS_PER_FILE = 30_000;
-	private static final Pattern XML_TAG = Pattern.compile("<[^>]+>");
 
 	public String extract(List<MultipartFile> files) {
 		if (files == null || files.isEmpty()) {
@@ -71,36 +71,42 @@ public class AttachmentTextExtractor {
 	}
 
 	/**
-	 * xlsx에서 텍스트를 추출합니다.
+	 * xlsx의 모든 시트에서 텍스트를 추출합니다. 셀은 탭, 행은 줄바꿈으로 구분하고,
+	 * 시트가 여러 개면 어느 시트의 내용인지 알 수 있게 "[시트: 이름]" 표시를 남깁니다.
+	 * (시트 구분이 있어야 GPT가 카테고리별 데이터를 올바르게 이해합니다)
 	 *
-	 * <p>반드시 2패스로 처리해야 합니다: xlsx의 문자열 셀은 실제 값이
-	 * xl/sharedStrings.xml에 모여 있고 시트에는 인덱스만 있는데,
-	 * zip 안에서 sharedStrings가 시트보다 뒤에 오는 파일도 있습니다(생성 도구마다 다름).
-	 * 스트림 순서대로 시트를 바로 변환하면 그런 파일에서 문자열 셀이 전부 유실되어
-	 * 민감정보가 마스킹 없이 누락되므로, 1패스에서 시트 XML은 보관만 하고
-	 * sharedStrings 확보가 끝난 뒤에 텍스트로 변환합니다.
+	 * <p>POI를 쓰는 이유(수제 XML 파서에서 교체): 같은 xlsx라도 생성 도구에 따라
+	 * XML에 네임스페이스 접두사({@code <x:row>} 등)가 붙거나 inlineStr 표기를 쓰는 등
+	 * 형태가 달라서, 태그 문자열 매칭 방식은 특정 도구가 만든 파일에서 추출 0자
+	 * (= 민감정보가 탐지 없이 통째로 누락)가 났습니다. POI는 OOXML 표준 전체를
+	 * 해석하므로 이런 표기 차이에 안전합니다.
 	 */
 	private String extractXlsx(byte[] bytes) throws IOException {
-		List<String> sharedStrings = new ArrayList<>();
-		List<String> sheetXmls = new ArrayList<>();
+		try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+			// DataFormatter는 셀의 "표시값"을 그대로 돌려준다 — 문자열로 저장된
+			// 전화번호("010-...")의 앞자리 0이나 하이픈이 숫자 변환으로 훼손되지 않는다
+			DataFormatter formatter = new DataFormatter();
+			boolean multiSheet = workbook.getNumberOfSheets() > 1;
 
-		try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
-			ZipEntry entry;
-			while ((entry = zip.getNextEntry()) != null) {
-				String name = entry.getName();
-				if ("xl/sharedStrings.xml".equals(name)) {
-					sharedStrings = extractXmlTextItems(new String(zip.readAllBytes(), StandardCharsets.UTF_8));
-				} else if (name.startsWith("xl/worksheets/") && name.endsWith(".xml")) {
-					sheetXmls.add(new String(zip.readAllBytes(), StandardCharsets.UTF_8));
+			StringBuilder out = new StringBuilder();
+			for (Sheet sheet : workbook) {
+				if (multiSheet) {
+					out.append("[시트: ").append(sheet.getSheetName()).append("]\n");
 				}
+				for (Row row : sheet) {
+					StringBuilder line = new StringBuilder();
+					for (Cell cell : row) {
+						line.append(formatter.formatCellValue(cell)).append('\t');
+					}
+					String lineText = line.toString().stripTrailing();
+					if (!lineText.isEmpty()) {
+						out.append(lineText).append('\n');
+					}
+				}
+				out.append('\n');
 			}
+			return out.toString().trim();
 		}
-
-		StringBuilder sheets = new StringBuilder();
-		for (String sheetXml : sheetXmls) {
-			sheets.append(extractSheetText(sheetXml, sharedStrings)).append("\n");
-		}
-		return sheets.toString().trim();
 	}
 
 	/**
@@ -133,59 +139,6 @@ public class AttachmentTextExtractor {
 	}
 
 	/**
-	 * 시트 XML을 "셀은 탭, 행은 줄바꿈"으로 구분된 텍스트로 변환합니다.
-	 * 행 구분을 살려야 GPT가 표 구조를 이해할 수 있고,
-	 * 마스킹 규칙도 셀 경계(탭/줄바꿈)를 기준으로 값을 탐지할 수 있습니다.
-	 */
-	private String extractSheetText(String xml, List<String> sharedStrings) {
-		StringBuilder result = new StringBuilder();
-		String[] rows = xml.split("<row ");
-		for (String row : rows) {
-			if (!row.contains("</c>")) {
-				continue;
-			}
-			StringBuilder line = new StringBuilder();
-			String[] cells = row.split("<c ");
-			for (String cell : cells) {
-				if (!cell.contains("</c>")) {
-					continue;
-				}
-				String value = extractBetween(cell, "<v>", "</v>");
-				String inline = extractBetween(cell, "<t>", "</t>");
-				if (cell.contains("t=\"s\"") && value != null) {
-					int index = Integer.parseInt(value.trim());
-					if (index >= 0 && index < sharedStrings.size()) {
-						line.append(sharedStrings.get(index)).append('\t');
-					}
-				} else if (inline != null) {
-					line.append(unescapeXml(inline)).append('\t');
-				} else if (value != null) {
-					line.append(value.trim()).append('\t');
-				}
-			}
-			result.append(line.toString().stripTrailing()).append('\n');
-		}
-		return result.toString();
-	}
-
-	private List<String> extractXmlTextItems(String xml) {
-		List<String> items = new ArrayList<>();
-		String[] parts = xml.split("<si>");
-		for (String part : parts) {
-			if (part.contains("</si>")) {
-				items.add(normalizeXmlText(part.substring(0, part.indexOf("</si>"))));
-			}
-		}
-		return items;
-	}
-
-	private String normalizeXmlText(String xml) {
-		return unescapeXml(XML_TAG.matcher(xml).replaceAll(" "))
-			.replaceAll("\\s+", " ")
-			.trim();
-	}
-
-	/**
 	 * Office 추출기가 반환한 공백을 마스킹 엔진이 처리하기 좋은 형태로 정리합니다.
 	 *
 	 * <p>연속 공백은 하나로 줄이되 줄바꿈은 유지합니다. 줄바꿈을 보존해야 표/문단의 경계가 남고,
@@ -201,27 +154,6 @@ public class AttachmentTextExtractor {
 			.replaceAll(" *\\n *", "\n")
 			.replaceAll("\\n{3,}", "\n\n")
 			.trim();
-	}
-
-	private String extractBetween(String text, String start, String end) {
-		int startIndex = text.indexOf(start);
-		if (startIndex < 0) {
-			return null;
-		}
-		int valueStart = startIndex + start.length();
-		int endIndex = text.indexOf(end, valueStart);
-		if (endIndex < 0) {
-			return null;
-		}
-		return text.substring(valueStart, endIndex);
-	}
-
-	private String unescapeXml(String text) {
-		return text.replace("&lt;", "<")
-			.replace("&gt;", ">")
-			.replace("&amp;", "&")
-			.replace("&quot;", "\"")
-			.replace("&apos;", "'");
 	}
 
 	private String extensionOf(String filename) {

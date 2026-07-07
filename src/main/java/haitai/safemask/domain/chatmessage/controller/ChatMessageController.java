@@ -3,6 +3,7 @@ package haitai.safemask.domain.chatmessage.controller;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import haitai.safemask.domain.chatmessage.dto.ChatRegenerateRequest;
 import haitai.safemask.domain.chatmessage.dto.ChatSendRequest;
 import haitai.safemask.domain.chatmessage.dto.ChatSendResponse;
 import haitai.safemask.domain.chatmessage.dto.ManualMaskRequest;
@@ -35,6 +36,13 @@ public class ChatMessageController {
 	public ResponseEntity<ChatSendResponse> send(@AuthenticationPrincipal Member member,
 		@RequestBody ChatSendRequest request) {
 		return ResponseEntity.ok(chatMessageService.send(member, request));
+	}
+
+	/** 답변 재생성: 채팅방의 마지막 AI 답변을 지우고 같은 맥락으로 다시 생성합니다. */
+	@PostMapping("/regenerate")
+	public ResponseEntity<ChatSendResponse> regenerate(@AuthenticationPrincipal Member member,
+		@RequestBody ChatRegenerateRequest request) {
+		return ResponseEntity.ok(chatMessageService.regenerate(member, request.chatRoomId()));
 	}
 
 	@PostMapping(value = "/with-files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

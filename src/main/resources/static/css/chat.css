@@ -965,3 +965,139 @@ body {
 	color: #3f6db4;
 	font-weight: 600;
 }
+
+/* ==== AI 답변 마크다운 렌더링 ==== */
+/* 렌더러가 만든 태그 사이 공백이 pre-wrap으로 벌어지지 않게 마크다운 말풍선만 일반 줄바꿈 규칙 사용 */
+.message-bubble.markdown {
+	white-space: normal;
+}
+
+.message-bubble.markdown p {
+	margin: 0 0 10px;
+}
+
+.message-bubble.markdown p:last-child {
+	margin-bottom: 0;
+}
+
+.message-bubble.markdown h1,
+.message-bubble.markdown h2,
+.message-bubble.markdown h3,
+.message-bubble.markdown h4,
+.message-bubble.markdown h5,
+.message-bubble.markdown h6 {
+	margin: 14px 0 8px;
+	font-size: 15px;
+	font-weight: 800;
+}
+
+.message-bubble.markdown h1 { font-size: 18px; }
+.message-bubble.markdown h2 { font-size: 16px; }
+
+.message-bubble.markdown ul,
+.message-bubble.markdown ol {
+	margin: 6px 0 10px;
+	padding-left: 22px;
+}
+
+.message-bubble.markdown li {
+	margin: 3px 0;
+}
+
+.message-bubble.markdown code {
+	padding: 2px 5px;
+	border-radius: 5px;
+	background: #ececf1;
+	font-family: 'D2Coding', Consolas, 'Courier New', monospace;
+	font-size: 13px;
+}
+
+.message-bubble.markdown pre {
+	margin: 8px 0 12px;
+	padding: 12px 14px;
+	border-radius: 10px;
+	background: #1f2328;
+	overflow-x: auto;
+}
+
+.message-bubble.markdown pre code {
+	padding: 0;
+	background: none;
+	color: #e6edf3;
+	white-space: pre;
+}
+
+.message-bubble.markdown table {
+	margin: 8px 0 12px;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.message-bubble.markdown th,
+.message-bubble.markdown td {
+	padding: 6px 10px;
+	border: 1px solid #dddddd;
+	text-align: left;
+}
+
+.message-bubble.markdown th {
+	background: #efeff3;
+	font-weight: 700;
+}
+
+.message-bubble.markdown hr {
+	margin: 12px 0;
+	border: none;
+	border-top: 1px solid #e2e2e6;
+}
+
+.message-bubble.markdown a {
+	color: #3f6db4;
+	text-decoration: underline;
+}
+
+/* ==== AI 답변 편의 버튼 (복사 / 다시 생성) ==== */
+.message-actions {
+	display: flex;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+/* 챗지피티처럼 텍스트 없이 아이콘만 있는 고스트 버튼 */
+.message-action-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text-gray);
+	cursor: pointer;
+}
+
+.message-action-button:hover {
+	background: #ececf0;
+	color: #333333;
+}
+
+/* 복사 성공 순간의 체크 아이콘 색 */
+.message-action-button.copied {
+	color: #2e9e5b;
+}
+
+/* 타이핑 중 흘러나오는 꼬리 텍스트 끝의 깜빡이는 캐럿 */
+.typing-tail::after {
+	content: '▍';
+	margin-left: 1px;
+	color: var(--brand-pink, #d94f70);
+	animation: typing-caret-blink 0.9s steps(2, start) infinite;
+}
+
+@keyframes typing-caret-blink {
+	to {
+		visibility: hidden;
+	}
+}
