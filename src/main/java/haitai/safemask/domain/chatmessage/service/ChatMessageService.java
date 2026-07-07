@@ -26,7 +26,9 @@ import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -137,6 +139,51 @@ public class ChatMessageService {
 		AiRun aiRun = aiRunRepository.save(AiRun.createApproved(chatRoom, userMessage));
 		saveMaskingAudit(aiRun, maskingResult.detections());
 
+		return generateAnswer(chatRoom, userMessage, aiRun, maskingResult.summary(), detections);
+	}
+
+	/**
+	 * 마지막 AI 답변을 지우고 같은 대화 맥락으로 다시 생성합니다. (답변 재생성 버튼)
+	 *
+	 * <p>사용자 메시지는 그대로 두고 마지막 ASSISTANT 메시지만 삭제한 뒤 GPT를 다시
+	 * 호출하므로, 마스킹·원복 흐름은 최초 전송과 동일하게 동작합니다.
+	 * 이전 답변의 AiRun·마스킹 감사 기록은 이력 추적을 위해 삭제하지 않습니다.
+	 */
+	@Transactional
+	public ChatSendResponse regenerate(Member member, Long chatRoomId) {
+		if (chatRoomId == null) {
+			throw new CustomException(ErrorCode.INVALID_REQUEST);
+		}
+		ChatRoom chatRoom = chatRoomRepository.findByIdAndMember_IdAndStatus(chatRoomId, member.getId(),
+				ChatRoomStatus.ACTIVE)
+			.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
+
+		// createdAt은 같은 요청에서 만들어진 행끼리 동률일 수 있어, 확정적인 id 기준으로 정렬한다
+		List<ChatMessage> messages = new ArrayList<>(chatMessageRepository.findByChatRoomOrderByCreatedAtDesc(chatRoom));
+		messages.sort(Comparator.comparing(ChatMessage::getId).reversed());
+
+		if (messages.isEmpty() || messages.get(0).getRole() != MessageRole.ASSISTANT) {
+			throw new CustomException(ErrorCode.INVALID_REQUEST, "다시 생성할 AI 답변이 없습니다.");
+		}
+		ChatMessage lastUserMessage = messages.stream()
+			.filter(message -> message.getRole() == MessageRole.USER)
+			.findFirst()
+			.orElseThrow(() -> new CustomException(ErrorCode.INVALID_REQUEST, "다시 생성할 AI 답변이 없습니다."));
+
+		chatMessageRepository.delete(messages.get(0));
+		chatRoom.touch();
+		AiRun aiRun = aiRunRepository.save(AiRun.createApproved(chatRoom, lastUserMessage));
+
+		// 재생성은 새 입력이 없으므로 마스킹 요약·탐지 정보 없이 답변만 새로 만든다
+		return generateAnswer(chatRoom, lastUserMessage, aiRun, Map.of(), List.of());
+	}
+
+	/**
+	 * 채팅방의 현재 대화 맥락으로 GPT를 호출해 답변을 만들고 저장합니다.
+	 * (최초 전송과 답변 재생성이 공유하는 공통 경로)
+	 */
+	private ChatSendResponse generateAnswer(ChatRoom chatRoom, ChatMessage userMessage, AiRun aiRun,
+		Map<MaskingType, Long> summary, List<MaskingDetectionResponse> detections) {
 		try {
 			aiRun.markCalling(modelName);
 			ChatResponse response = chatModel.call(new Prompt(buildPromptMessages(chatRoom)));
@@ -157,7 +204,7 @@ public class ChatMessageService {
 				usage == null ? null : usage.getCompletionTokens());
 
 			return ChatSendResponse.completed(chatRoom.getId(), userMessage.getId(), assistantMessage.getId(),
-				fileOutcome.displayContent(), maskingResult.summary(), detections, fileOutcome.files());
+				fileOutcome.displayContent(), summary, detections, fileOutcome.files());
 		} catch (RuntimeException e) {
 			aiRun.markFailed(e.getMessage());
 			throw new CustomException(ErrorCode.AI_SERVICE_UNAVAILABLE, e);
