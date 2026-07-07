@@ -1,11 +1,14 @@
 package haitai.safemask.domain.masking.service;
 
 import haitai.safemask.domain.masking.dto.MaskingResult;
+import haitai.safemask.domain.masking.engine.DetectionPolicies;
 import haitai.safemask.domain.masking.engine.MaskingEngine;
 import haitai.safemask.domain.masking.store.TokenMappingStore;
 import haitai.safemask.domain.maskingentity.enums.MaskingType;
 import haitai.safemask.domain.maskingrule.entity.MaskingRule;
 import haitai.safemask.domain.maskingrule.repository.MaskingRuleRepository;
+import haitai.safemask.domain.maskingrule.service.MaskingRuleSeeder;
+import haitai.safemask.domain.namedictionary.service.NameDictionaryService;
 import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
 import java.util.List;
@@ -32,6 +35,7 @@ public class MaskingService {
 	private final MaskingRuleRepository maskingRuleRepository;
 	private final TokenMappingStore tokenMappingStore;
 	private final MaskingEngine maskingEngine;
+	private final NameDictionaryService nameDictionaryService;
 
 	/**
 	 * 텍스트에서 민감정보를 탐지해 토큰으로 치환합니다.
@@ -40,10 +44,26 @@ public class MaskingService {
 	public MaskingResult mask(Long chatRoomId, String text) {
 		validateText(text);
 
-		List<MaskingRule> activeRules = maskingRuleRepository.findByEnabledTrueOrderByPriorityAsc();
-		return maskingEngine.mask(text, activeRules,
-			(type, value) -> tokenMappingStore.getOrCreateToken(chatRoomId, type, value));
+		return maskingEngine.mask(text, resolveActiveRules(),
+			(type, value) -> tokenMappingStore.getOrCreateToken(chatRoomId, type, value),
+			DetectionPolicies.standard(text, nameDictionaryService.snapshot()));
 	}
+
+	/**
+	 * 활성 규칙을 조회하되, 이름 사전이 비어 있으면 "이름(문장 속)" 규칙을 제외합니다.
+	 * 이 규칙은 사전 검증 없이는 성씨로 시작하는 세 글자 일반 단어("고마워" 등)를
+	 * 마구 잡기 때문에, 사전 없이 단독으로 켜지면 안 됩니다.
+	 */
+	private List<MaskingRule> resolveActiveRules() {
+		List<MaskingRule> activeRules = maskingRuleRepository.findByEnabledTrueOrderByPriorityAsc();
+		if (!nameDictionaryService.isEmpty()) {
+			return activeRules;
+		}
+		return activeRules.stream()
+			.filter(rule -> !MaskingRuleSeeder.NAME_IN_SENTENCE_RULE_NAME.equals(rule.getName()))
+			.toList();
+	}
+
 
 	/**
 	 * 사용자가 미리보기 화면에서 직접 지정한 값을 추가로 마스킹합니다.
