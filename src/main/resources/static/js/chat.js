@@ -16,8 +16,11 @@
 
 	const SUPPORTED_FILE_TYPES = {
 		txt: { label: 'TXT', kind: 'text', mark: 'Aa' },
+		md: { label: 'MD', kind: 'text', mark: 'Md' },
 		csv: { label: 'CSV', kind: 'csv', mark: '1,2' },
-		xlsx: { label: 'XLS', kind: 'excel', mark: '▦' },
+		xls: { label: 'XLS', kind: 'excel', mark: '▦' },
+		xlsx: { label: 'XLSX', kind: 'excel', mark: '▦' },
+		doc: { label: 'DOC', kind: 'word', mark: 'W' },
 		docx: { label: 'DOC', kind: 'word', mark: '¶' },
 		pdf: { label: 'PDF', kind: 'pdf', mark: 'PDF' }
 	};
@@ -148,12 +151,13 @@
 		activeRequest = requestState;
 
 		let optimisticUserRow = null;
+		const sentFiles = attachedFiles.slice();
 		if (!approved) {
-			optimisticUserRow = appendMessage('user', buildUserDisplayText(content));
+			optimisticUserRow = appendMessage('user', content, { files: sentFiles });
 			messageInput.value = '';
 			resizeComposer();
 		} else if (!pendingPreview || !pendingPreview.userRow) {
-			appendMessage('user', buildUserDisplayText(content));
+			appendMessage('user', content, { files: sentFiles });
 		}
 
 		const statusProfile = buildStatusProfile(approved, attachedFiles.length > 0);
@@ -223,8 +227,11 @@
 		}
 	}
 
-	function appendMessage(role, text) {
+	function appendMessage(role, text, options) {
 		setChatting(true);
+		const normalized = normalizeMessageAttachments(role, text, options);
+		text = normalized.text;
+		options = normalized.options;
 
 		const row = document.createElement('div');
 		row.className = `message-row ${role}`;
@@ -250,7 +257,14 @@
 		}
 
 		body.appendChild(author);
-		body.appendChild(bubble);
+		if (text && text.trim()) {
+			body.appendChild(bubble);
+		}
+		if (role === 'user' && options && options.files && options.files.length > 0) {
+			const sentFiles = createFileCardList(options.files, { removable: false });
+			sentFiles.classList.add('sent-files');
+			body.appendChild(sentFiles);
+		}
 		if (role === 'assistant') {
 			attachGeneratedFileCards(body, text);
 			attachAssistantActions(row, body, text);
@@ -718,6 +732,10 @@
 		regenButton.setAttribute('aria-label', '답변 다시 생성');
 		regenButton.innerHTML = REGEN_ICON;
 		regenButton.addEventListener('click', function () {
+			if (!isLastAssistantRow(row)) {
+				updateRegenerateVisibility();
+				return;
+			}
 			regenerateLastAnswer(row);
 		});
 
@@ -735,6 +753,11 @@
 				regenButton.hidden = index !== assistantRows.length - 1;
 			}
 		});
+	}
+
+	function isLastAssistantRow(row) {
+		const assistantRows = Array.from(messageList.querySelectorAll('.message-row.assistant:not(.status)'));
+		return assistantRows.length > 0 && assistantRows[assistantRows.length - 1] === row;
 	}
 
 	/** 답변 원문(마크다운 기호 포함)을 클립보드로 복사한다 */
@@ -841,7 +864,7 @@
 		}
 
 		const wrap = document.createElement('div');
-		wrap.className = 'generated-files';
+		wrap.className = 'generated-files file-card-list';
 		matches.forEach(function (match) {
 			wrap.appendChild(createFileDownloadCard(Number(match[2]), match[1]));
 		});
@@ -851,22 +874,14 @@
 	function createFileDownloadCard(fileId, fileName) {
 		const button = document.createElement('button');
 		button.type = 'button';
-		button.className = 'file-download-card';
-
-		const icon = document.createElement('span');
-		icon.className = 'file-icon';
-		icon.textContent = '📄';
-
-		const nameSpan = document.createElement('span');
-		nameSpan.className = 'file-name';
-		nameSpan.textContent = fileName;
+		button.className = 'file-download-card file-card';
 
 		const action = document.createElement('span');
 		action.className = 'file-action';
 		action.textContent = '다운로드';
 
-		button.appendChild(icon);
-		button.appendChild(nameSpan);
+		button.appendChild(createFileTypeBadge(fileName));
+		button.appendChild(createFileMeta(fileName, null));
 		button.appendChild(action);
 		button.addEventListener('click', function () {
 			downloadGeneratedFile(fileId, fileName, button);
@@ -1037,49 +1052,130 @@
 	function renderAttachments() {
 		attachmentList.innerHTML = '';
 		attachmentList.hidden = attachedFiles.length === 0;
-		attachedFiles.forEach(function (file, index) {
-			const item = document.createElement('li');
-			const type = getFileType(file.name);
-			item.className = `attachment-card ${type.kind}`;
-
-			const badge = document.createElement('span');
-			badge.className = `file-type-badge ${type.kind}`;
-			const mark = document.createElement('span');
-			mark.className = 'file-type-mark';
-			mark.textContent = type.mark;
-			const label = document.createElement('span');
-			label.className = 'file-type-label';
-			label.textContent = type.label;
-			badge.appendChild(mark);
-			badge.appendChild(label);
-
-			const meta = document.createElement('span');
-			meta.className = 'file-meta';
-
-			const nameSpan = document.createElement('span');
-			nameSpan.className = 'file-name';
-			nameSpan.textContent = file.name;
-
-			const sizeSpan = document.createElement('span');
-			sizeSpan.className = 'file-size';
-			sizeSpan.textContent = formatFileSize(file.size);
-
-			const removeButton = document.createElement('button');
-			removeButton.type = 'button';
-			removeButton.textContent = '×';
-			removeButton.title = '첨부 제거';
-			removeButton.addEventListener('click', function () {
+		attachmentList.append(...Array.from(createFileCardList(attachedFiles, {
+			itemTag: 'li',
+			removable: true,
+			onRemove: function (index) {
 				attachedFiles.splice(index, 1);
 				renderAttachments();
-			});
+			}
+		}).children));
+	}
 
-			meta.appendChild(nameSpan);
-			meta.appendChild(sizeSpan);
-			item.appendChild(badge);
-			item.appendChild(meta);
-			item.appendChild(removeButton);
-			attachmentList.appendChild(item);
+	function createFileCardList(files, options) {
+		const list = document.createElement('div');
+		list.className = 'file-card-list';
+		files.forEach(function (file, index) {
+			const fileName = file.name || file.fileName || '파일';
+			const item = document.createElement(options && options.itemTag ? options.itemTag : 'div');
+			const type = getFileType(fileName) || { kind: 'text' };
+			item.className = `file-card ${type.kind}`;
+
+			item.appendChild(createFileTypeBadge(fileName));
+			item.appendChild(createFileMeta(fileName, file));
+			if (options && options.removable) {
+				const removeButton = document.createElement('button');
+				removeButton.type = 'button';
+				removeButton.className = 'file-remove-button';
+				removeButton.textContent = '×';
+				removeButton.title = '첨부 제거';
+				removeButton.addEventListener('click', function () {
+					options.onRemove(index);
+				});
+				item.appendChild(removeButton);
+			}
+			list.appendChild(item);
 		});
+		return list;
+	}
+
+	function createFileTypeBadge(fileName) {
+		const type = getFileType(fileName) || { label: 'FILE', kind: 'text', mark: '··' };
+		const badge = document.createElement('span');
+		badge.className = `file-type-badge ${type.kind}`;
+		const mark = document.createElement('span');
+		mark.className = 'file-type-mark';
+		mark.textContent = type.mark;
+		const label = document.createElement('span');
+		label.className = 'file-type-label';
+		label.textContent = type.label;
+		badge.appendChild(mark);
+		badge.appendChild(label);
+		return badge;
+	}
+
+	function createFileMeta(fileName, file) {
+		const meta = document.createElement('span');
+		meta.className = 'file-meta';
+		const nameSpan = document.createElement('span');
+		nameSpan.className = 'file-name';
+		nameSpan.textContent = fileName;
+		const sizeSpan = document.createElement('span');
+		sizeSpan.className = 'file-size';
+		if (file && typeof file.size === 'number') {
+			sizeSpan.textContent = formatFileSize(file.size);
+		} else if (file && file.sizeLabel) {
+			sizeSpan.textContent = file.sizeLabel;
+		} else {
+			sizeSpan.textContent = '생성된 파일';
+		}
+		meta.appendChild(nameSpan);
+		meta.appendChild(sizeSpan);
+		return meta;
+	}
+
+	function normalizeMessageAttachments(role, text, options) {
+		if (role !== 'user') {
+			return { text: text, options: options };
+		}
+		if (options && options.files && options.files.length > 0) {
+			return { text: text, options: options };
+		}
+		const parsed = parseLegacyAttachmentText(text || '');
+		if (parsed.files.length === 0) {
+			return { text: text, options: options };
+		}
+		return {
+			text: parsed.text,
+			options: Object.assign({}, options || {}, { files: parsed.files })
+		};
+	}
+
+	function parseLegacyAttachmentText(text) {
+		const marker = '\n\n첨부 파일\n';
+		let markerIndex = text.lastIndexOf(marker);
+		let prefixLength = marker.length;
+		if (markerIndex < 0 && text.startsWith('첨부 파일\n')) {
+			markerIndex = 0;
+			prefixLength = '첨부 파일\n'.length;
+		}
+		if (markerIndex < 0) {
+			return { text: text, files: [] };
+		}
+
+		const before = text.slice(0, markerIndex).trim();
+		const attachmentBlock = text.slice(markerIndex + prefixLength).trim();
+		if (!attachmentBlock) {
+			return { text: text, files: [] };
+		}
+
+		const files = attachmentBlock.split('\n')
+			.map(function (line) {
+				const match = line.match(/^- (.+?)(?: \(([^()]+)\))?$/);
+				if (!match) {
+					return null;
+				}
+				return {
+					name: match[1],
+					sizeLabel: match[2] || '첨부 파일'
+				};
+			})
+			.filter(Boolean);
+
+		if (files.length === 0) {
+			return { text: text, files: [] };
+		}
+		return { text: before, files: files };
 	}
 
 	function getFileType(fileName) {
@@ -1098,19 +1194,6 @@
 	function hideAttachmentNotice() {
 		attachmentNotice.hidden = true;
 		attachmentNotice.textContent = '';
-	}
-
-	function buildUserDisplayText(content) {
-		if (attachedFiles.length === 0) {
-			return content;
-		}
-		const fileText = attachedFiles.map(function (file) {
-			return `- ${file.name} (${formatFileSize(file.size)})`;
-		}).join('\n');
-		if (!content) {
-			return `첨부 파일\n${fileText}`;
-		}
-		return `${content}\n\n첨부 파일\n${fileText}`;
 	}
 
 	function buildAttachmentTitle() {

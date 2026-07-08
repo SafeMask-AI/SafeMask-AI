@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -52,6 +54,11 @@ public class GeneratedFileService {
 
 	/** 응답 하나에서 만들 수 있는 최대 파일 수 (모델 오동작으로 인한 대량 생성 방지) */
 	private static final int MAX_FILES_PER_ANSWER = 5;
+
+	private static final List<FileAssetStatus> EDITABLE_SOURCE_STATUSES = List.of(
+		FileAssetStatus.UPLOADED, FileAssetStatus.GENERATED);
+
+	private static final Pattern GENERATED_FILE_ID_PATTERN = Pattern.compile("생성된 파일: .+? \\(파일번호 (\\d+)\\)");
 
 	private final AiFileBlockParser aiFileBlockParser;
 	private final AiEditBlockParser aiEditBlockParser;
@@ -112,6 +119,38 @@ public class GeneratedFileService {
 	}
 
 	/**
+	 * 답변 재생성으로 교체되는 assistant 메시지에 연결된 생성 파일을 더 이상
+	 * 활성 다운로드 대상으로 보지 않도록 정리합니다.
+	 *
+	 * <p>같은 트랜잭션 안에서 호출되므로 재생성이 실패하면 메시지 삭제와 함께
+	 * 파일 상태 변경도 롤백됩니다. 물리 파일은 채팅방 정리 시 삭제하고, 여기서는
+	 * 기존 다운로드 버튼/히스토리 중복 노출을 막기 위해 상태만 바꿉니다.
+	 */
+	public void retireGeneratedFilesFromAnswer(ChatRoom chatRoom, String answerContent) {
+		if (answerContent == null || answerContent.isBlank()) {
+			return;
+		}
+		Matcher matcher = GENERATED_FILE_ID_PATTERN.matcher(answerContent);
+		while (matcher.find()) {
+			Long fileId = parseFileId(matcher.group(1));
+			if (fileId == null) {
+				continue;
+			}
+			fileAssetRepository.findByIdAndChatRoom_Id(fileId, chatRoom.getId())
+				.filter(asset -> asset.getStatus() == FileAssetStatus.GENERATED)
+				.ifPresent(FileAsset::markDeleted);
+		}
+	}
+
+	private Long parseFileId(String raw) {
+		try {
+			return Long.valueOf(raw);
+		} catch (NumberFormatException e) {
+			return null;
+		}
+	}
+
+	/**
 	 * 생성 블록 하나를 파일로 만들고, 본문에 남길 안내 문구를 반환합니다.
 	 * 안내 문구의 "(파일번호 N)" 표기는 프런트가 과거 대화를 다시 열었을 때
 	 * 다운로드 버튼을 복원하는 근거가 되므로 형식을 바꾸면 chat.js도 함께 바꿔야 합니다.
@@ -164,16 +203,18 @@ public class GeneratedFileService {
 		}
 	}
 
-	/** 편집 대상 원본 조회: 파일명 일치 → 없으면 채팅방의 최근 업로드 파일로 폴백 */
+	/** 편집 대상 조회: 파일명 일치 → 없으면 채팅방의 최근 xlsx 업로드/생성 파일로 폴백 */
 	private Optional<FileAsset> findOriginal(ChatRoom chatRoom, String targetFileName) {
 		// 최신순 목록에서 첫 건만 사용 (LIMIT 파생 쿼리의 Oracle 호환 문제 회피 — 리포지토리 주석 참고)
 		return fileAssetRepository
-			.findByChatRoom_IdAndOriginalNameAndStatusOrderByIdDesc(
-				chatRoom.getId(), targetFileName, FileAssetStatus.UPLOADED)
+			.findByChatRoom_IdAndOriginalNameAndStatusInOrderByIdDesc(
+				chatRoom.getId(), targetFileName, EDITABLE_SOURCE_STATUSES)
 			.stream().findFirst()
-			.or(() -> fileAssetRepository.findByChatRoom_IdAndStatusOrderByIdDesc(
-				chatRoom.getId(), FileAssetStatus.UPLOADED)
-				.stream().findFirst());
+			.or(() -> fileAssetRepository.findByChatRoom_IdAndStatusInOrderByIdDesc(
+				chatRoom.getId(), EDITABLE_SOURCE_STATUSES)
+				.stream()
+				.filter(asset -> "xlsx".equals(extensionOf(asset.getOriginalName())))
+				.findFirst());
 	}
 
 	private String resolveResultName(EditBlock block, String originalName) {

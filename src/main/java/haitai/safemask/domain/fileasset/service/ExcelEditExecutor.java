@@ -12,13 +12,25 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.Font;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.SpreadsheetVersion;
+import org.apache.poi.ss.util.AreaReference;
+import org.apache.poi.ss.util.CellReference;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFColor;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFTable;
+import org.apache.poi.xssf.usermodel.XSSFFont;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Component;
 
@@ -29,23 +41,40 @@ import org.springframework.stereotype.Component;
  * 셀 스타일 객체를 그대로 옮겨 붙이는 방식이라, 지시가 건드리지 않은
  * 서식(색상, 글꼴, 테두리, 열 너비, 행 높이 등)은 결과 파일에 그대로 보존됩니다.
  *
- * <p>서식을 깨뜨릴 위험이 낮은 6개 연산을 지원합니다:
- * delete_column / rename_column / filter_rows / sort / replace_value / add_row.
+ * <p>서식을 깨뜨릴 위험이 낮은 연산을 지원합니다:
+ * delete_column / rename_column / filter_rows / sort / replace_value / add_row와
+ * 헤더·컬럼·조건부 행 강조 같은 제한된 서식 변경.
  * 결과 신뢰를 지키기 위해, 안전하게 처리할 수 없는 파일은 어설프게 수정하지 않고
  * {@link UnsupportedEditException}으로 거절합니다. (셀 위치를 옮기는 연산 + 수식·병합 셀 파일)
  */
 @Component
 public class ExcelEditExecutor {
 
-	/** 데이터가 시작되는 행 인덱스 (0행은 헤더로 간주) */
-	private static final int FIRST_DATA_ROW = 1;
-
 	/**
 	 * 기존 셀의 "위치"를 옮기지 않는 연산들. (값 변경 또는 마지막 행 아래 추가)
 	 * 수식 참조나 병합 구조를 깨뜨릴 수 없으므로, 구조 이동 연산과 달리
 	 * 수식·병합 셀이 있는 파일에도 안전하게 적용할 수 있습니다.
 	 */
-	private static final Set<String> NON_STRUCTURAL_OPS = Set.of("rename_column", "replace_value", "add_row");
+	private static final Set<String> NON_STRUCTURAL_OPS = Set.of(
+		"rename_column", "replace_value", "add_row",
+		"format_header", "format_column", "highlight_rows", "set_column_width");
+
+	private static final Set<String> SUMMARY_LABELS = Set.of("합계", "총계", "계", "total", "sum");
+
+	private static final Map<String, String> NAMED_COLORS = Map.ofEntries(
+		Map.entry("검정", "000000"),
+		Map.entry("흰색", "FFFFFF"),
+		Map.entry("빨강", "C00000"),
+		Map.entry("붉은색", "C00000"),
+		Map.entry("노랑", "FFF2CC"),
+		Map.entry("노란색", "FFF2CC"),
+		Map.entry("초록", "00B050"),
+		Map.entry("파랑", "0070C0"),
+		Map.entry("하늘색", "D9EAF7"),
+		Map.entry("회색", "D9E1F2"),
+		Map.entry("연회색", "E7E6E6"),
+		Map.entry("주황", "F4B183")
+	);
 
 	private final DataFormatter formatter = new DataFormatter();
 
@@ -58,16 +87,18 @@ public class ExcelEditExecutor {
 
 	/**
 	 * 원본 바이트의 카피에 편집 지시를 순서대로 적용한 결과 바이트를 반환합니다.
-	 * 편집은 첫 번째 시트에 적용되며, 나머지 시트는 그대로 복사됩니다.
+	 * 편집은 지시별 sheet 값 또는 헤더 추론으로 고른 시트에 적용되며,
+	 * 나머지 시트는 그대로 복사됩니다.
 	 */
 	public byte[] apply(byte[] originalBytes, ExcelEditInstruction instruction) {
 		try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(originalBytes));
 			ByteArrayOutputStream out = new ByteArrayOutputStream()) {
 
-			Sheet sheet = workbook.getSheetAt(0);
-			validateEditable(sheet, instruction);
+			validateInstruction(instruction);
 
 			for (Op op : instruction.ops()) {
+				Sheet sheet = resolveSheet(workbook, op);
+				validateEditable(sheet, op);
 				applyOp(sheet, op);
 			}
 
@@ -83,16 +114,16 @@ public class ExcelEditExecutor {
 	 * 어설프게 수정해서 깨진 파일을 주는 것보다 이유를 밝히고 거절하는 편이
 	 * 서비스 신뢰에 낫다는 방침입니다. (거절 사유는 채팅 안내 문구로 노출됨)
 	 */
-	private void validateEditable(Sheet sheet, ExcelEditInstruction instruction) {
+	private void validateInstruction(ExcelEditInstruction instruction) {
 		if (instruction.ops() == null || instruction.ops().isEmpty()) {
 			throw new UnsupportedEditException("적용할 편집 내용이 없습니다");
 		}
+	}
 
+	private void validateEditable(Sheet sheet, Op op) {
 		// 셀 위치를 옮기지 않는 연산(이름 변경, 값 치환, 행 추가)은 수식·병합을
 		// 깨뜨릴 수 없으므로 파일 상태와 무관하게 허용한다. (실사용 수정 요청의 대부분)
-		boolean nonStructural = instruction.ops().stream()
-			.allMatch(op -> op != null && NON_STRUCTURAL_OPS.contains(op.op()));
-		if (nonStructural) {
+		if (op != null && NON_STRUCTURAL_OPS.contains(op.op())) {
 			return;
 		}
 
@@ -124,24 +155,165 @@ public class ExcelEditExecutor {
 			case "sort" -> sortRows(sheet, op);
 			case "replace_value" -> replaceValue(sheet, op);
 			case "add_row" -> addRow(sheet, op);
+			case "format_header" -> formatHeader(sheet, op);
+			case "format_column" -> formatColumn(sheet, op);
+			case "highlight_rows" -> highlightRows(sheet, op);
+			case "set_column_width" -> setColumnWidth(sheet, op);
 			default -> throw new UnsupportedEditException("지원하지 않는 편집 지시입니다: " + op.op());
 		}
 	}
 
-	/** 헤더(첫 행)에서 컬럼 이름으로 열 인덱스를 찾습니다. */
-	private int requireColumn(Sheet sheet, String columnName) {
-		if (columnName == null || columnName.isBlank()) {
-			throw new UnsupportedEditException("편집 지시에 컬럼 이름이 없습니다");
+	private Sheet resolveSheet(XSSFWorkbook workbook, Op op) {
+		if (op == null) {
+			throw new UnsupportedEditException("알 수 없는 편집 지시가 있습니다");
 		}
-		Row header = sheet.getRow(0);
-		if (header != null) {
+		if (op.sheet() != null && !op.sheet().isBlank()) {
+			return requireSheet(workbook, op.sheet());
+		}
+
+		List<String> requiredHeaders = requiredHeaders(op);
+		if (!requiredHeaders.isEmpty()) {
+			List<Sheet> candidates = new ArrayList<>();
+			for (Sheet sheet : workbook) {
+				if (requiredHeaders.stream().allMatch(header -> findColumn(sheet, header) != null)) {
+					candidates.add(sheet);
+				}
+			}
+			if (candidates.size() == 1) {
+				return candidates.get(0);
+			}
+			if (candidates.size() > 1) {
+				throw new UnsupportedEditException(
+					"여러 시트에서 같은 컬럼을 찾았습니다. 수정할 sheet를 지정해 주세요: " + sheetNames(candidates));
+			}
+		}
+
+		if (workbook.getNumberOfSheets() == 1) {
+			return workbook.getSheetAt(0);
+		}
+		throw new UnsupportedEditException("여러 시트가 있는 파일은 수정할 sheet를 지정해야 합니다");
+	}
+
+	private Sheet requireSheet(XSSFWorkbook workbook, String requestedName) {
+		String normalizedRequest = normalizeSheetName(requestedName);
+		for (Sheet sheet : workbook) {
+			if (sheet.getSheetName().equals(requestedName.trim())
+				|| normalizeSheetName(sheet.getSheetName()).equals(normalizedRequest)) {
+				return sheet;
+			}
+		}
+		throw new UnsupportedEditException("시트를 찾지 못했습니다: " + requestedName);
+	}
+
+	private String normalizeSheetName(String name) {
+		return name.replaceAll("[\\s_\\-·]", "").toLowerCase(Locale.ROOT);
+	}
+
+	private List<String> requiredHeaders(Op op) {
+		return switch (op.op()) {
+			case "delete_column", "filter_rows", "sort", "format_column", "highlight_rows", "set_column_width" ->
+				op.column() == null || op.column().isBlank() ? List.of() : List.of(op.column());
+			case "rename_column" -> op.from() == null || op.from().isBlank() ? List.of() : List.of(op.from());
+			case "replace_value" -> op.column() == null || op.column().isBlank() ? List.of() : List.of(op.column());
+			default -> List.of();
+		};
+	}
+
+	private String sheetNames(List<Sheet> sheets) {
+		return sheets.stream().map(Sheet::getSheetName).toList().toString();
+	}
+
+	/** 탐지된 헤더 행에서 컬럼 이름으로 열 인덱스를 찾습니다. */
+	private int requireColumn(Sheet sheet, String columnName) {
+		Integer columnIndex = findColumn(sheet, columnName);
+		if (columnIndex != null) {
+			return columnIndex;
+		}
+		throw new UnsupportedEditException("'" + columnName + "' 컬럼을 찾지 못했습니다");
+	}
+
+	private Integer findColumn(Sheet sheet, String columnName) {
+		if (columnName == null || columnName.isBlank()) {
+			return null;
+		}
+		int searchEnd = Math.min(sheet.getLastRowNum(), 30);
+		for (int r = 0; r <= searchEnd; r++) {
+			Row header = sheet.getRow(r);
+			if (header == null) {
+				continue;
+			}
 			for (Cell cell : header) {
 				if (columnName.trim().equals(formatter.formatCellValue(cell).trim())) {
 					return cell.getColumnIndex();
 				}
 			}
 		}
-		throw new UnsupportedEditException("'" + columnName + "' 컬럼을 찾지 못했습니다");
+		return null;
+	}
+
+	private Row requireHeaderRow(Sheet sheet) {
+		Row header = findHeaderRow(sheet);
+		if (header == null) {
+			throw new UnsupportedEditException("헤더 행을 찾지 못했습니다: " + sheet.getSheetName());
+		}
+		return header;
+	}
+
+	private Row findHeaderRow(Sheet sheet) {
+		int searchEnd = Math.min(sheet.getLastRowNum(), 30);
+		Row best = null;
+		int bestCount = 0;
+		for (int r = 0; r <= searchEnd; r++) {
+			Row row = sheet.getRow(r);
+			int count = nonBlankCellCount(row);
+			if (count > bestCount) {
+				best = row;
+				bestCount = count;
+			}
+		}
+		return bestCount >= 2 ? best : sheet.getRow(0);
+	}
+
+	private int nonBlankCellCount(Row row) {
+		if (row == null) {
+			return 0;
+		}
+		int count = 0;
+		for (Cell cell : row) {
+			if (cell.getCellType() == CellType.FORMULA) {
+				continue;
+			}
+			if (!formatter.formatCellValue(cell).trim().isEmpty()) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	private int firstDataRow(Sheet sheet) {
+		return requireHeaderRow(sheet).getRowNum() + 1;
+	}
+
+	private int lastContentRow(Sheet sheet) {
+		for (int r = sheet.getLastRowNum(); r >= 0; r--) {
+			Row row = sheet.getRow(r);
+			if (rowHasContent(row)) {
+				return r;
+			}
+		}
+		return 0;
+	}
+
+	private boolean rowHasContent(Row row) {
+		if (row == null) {
+			return false;
+		}
+		for (Cell cell : row) {
+			if (!formatter.formatCellValue(cell).trim().isEmpty() || cell.getCellType() == CellType.FORMULA) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -197,7 +369,7 @@ public class ExcelEditExecutor {
 		validateFilterCondition(op);
 
 		// 아래에서 위로 지워야 shiftRows로 당겨진 행 인덱스가 꼬이지 않음
-		for (int r = sheet.getLastRowNum(); r >= FIRST_DATA_ROW; r--) {
+		for (int r = lastContentRow(sheet); r >= firstDataRow(sheet); r--) {
 			Row row = sheet.getRow(r);
 			String value = row == null ? "" : formatter.formatCellValue(row.getCell(columnIndex)).trim();
 			if (!matchesFilter(value, op)) {
@@ -269,31 +441,35 @@ public class ExcelEditExecutor {
 	}
 
 	/**
-	 * 행 추가: 마지막 데이터 행 아래에 새 행을 만듭니다.
-	 * 바로 위 행(마지막 데이터 행)의 셀 서식·행 높이를 그대로 입혀서,
-	 * 사용자가 꾸며놓은 표에 "원래 있던 행처럼" 자연스럽게 이어지게 합니다.
-	 * (행 추가 요청이 파일 재생성으로 빠져 디자인이 사라지는 문제의 해결책)
+	 * 행 추가: 표 본문 스타일을 새 행에 입힙니다.
+	 * 마지막 행이 합계/총계처럼 보이면 그 위에 삽입해 합계 행 디자인이 본문으로
+	 * 번지지 않게 하고, 값이 비어 있는 열도 헤더 범위만큼 셀을 만들어 테두리·포맷을 이어줍니다.
 	 */
 	private void addRow(Sheet sheet, Op op) {
 		if (op.values() == null || op.values().isEmpty()) {
 			throw new UnsupportedEditException("행 추가에는 values(셀 값 목록)가 필요합니다");
 		}
 
-		// 서식 본보기는 바로 위 행. add_row를 연속 사용하면 직전에 추가된 행이 본보기가 된다.
-		Row template = sheet.getRow(sheet.getLastRowNum());
-		Row row = sheet.createRow(sheet.getLastRowNum() + 1);
+		int insertIndex = resolveRowInsertIndex(sheet);
+		Row template = resolveBodyTemplateRow(sheet, insertIndex);
+		if (insertIndex <= lastContentRow(sheet)) {
+			sheet.shiftRows(insertIndex, sheet.getLastRowNum(), 1, true, false);
+		}
+
+		Row row = sheet.createRow(insertIndex);
 		if (template != null) {
 			row.setHeight(template.getHeight());
 		}
 
-		for (int c = 0; c < op.values().size(); c++) {
+		int maxColumn = Math.max(op.values().size(), headerColumnCount(sheet));
+		for (int c = 0; c < maxColumn; c++) {
 			Cell cell = row.createCell(c);
 			Cell templateCell = template == null ? null : template.getCell(c);
 			if (templateCell != null) {
 				cell.setCellStyle(templateCell.getCellStyle());
 			}
 
-			String value = op.values().get(c) == null ? "" : op.values().get(c).trim();
+			String value = c < op.values().size() && op.values().get(c) != null ? op.values().get(c).trim() : "";
 			// 본보기 셀이 숫자면 새 값도 숫자로 저장해 정렬·계산 호환을 지킨다
 			if (templateCell != null && templateCell.getCellType() == CellType.NUMERIC) {
 				Double number = tryParseNumber(value);
@@ -304,6 +480,227 @@ public class ExcelEditExecutor {
 			}
 			cell.setCellValue(value);
 		}
+		expandTablesForInsertedRow(sheet, insertIndex);
+	}
+
+	private void expandTablesForInsertedRow(Sheet sheet, int insertIndex) {
+		if (!(sheet instanceof XSSFSheet xssfSheet)) {
+			return;
+		}
+		for (XSSFTable table : xssfSheet.getTables()) {
+			CellReference start = table.getStartCellReference();
+			CellReference end = table.getEndCellReference();
+			if (start == null || end == null) {
+				continue;
+			}
+			if (insertIndex < start.getRow() + 1 || insertIndex > end.getRow() + 1) {
+				continue;
+			}
+			CellReference expandedEnd = new CellReference(Math.max(insertIndex, end.getRow() + 1), end.getCol());
+			table.setArea(new AreaReference(start, expandedEnd, SpreadsheetVersion.EXCEL2007));
+		}
+	}
+
+	private int resolveRowInsertIndex(Sheet sheet) {
+		int lastRow = lastContentRow(sheet);
+		Row last = sheet.getRow(lastRow);
+		if (last != null && isSummaryRow(last)) {
+			return lastRow;
+		}
+		return lastRow + 1;
+	}
+
+	private Row resolveBodyTemplateRow(Sheet sheet, int insertIndex) {
+		Row alternatingTemplate = resolveAlternatingTemplateRow(sheet, insertIndex);
+		if (alternatingTemplate != null) {
+			return alternatingTemplate;
+		}
+		for (int r = insertIndex - 1; r >= firstDataRow(sheet); r--) {
+			Row row = sheet.getRow(r);
+			if (row != null && !isSummaryRow(row)) {
+				return row;
+			}
+		}
+		return sheet.getRow(Math.max(0, insertIndex - 1));
+	}
+
+	private Row resolveAlternatingTemplateRow(Sheet sheet, int insertIndex) {
+		List<Row> previousRows = new ArrayList<>();
+		for (int r = insertIndex - 1; r >= firstDataRow(sheet) && previousRows.size() < 4; r--) {
+			Row row = sheet.getRow(r);
+			if (row != null && rowHasContent(row) && !isSummaryRow(row)) {
+				previousRows.add(row);
+			}
+		}
+		if (previousRows.size() < 4) {
+			return null;
+		}
+
+		int maxColumn = headerColumnCount(sheet);
+		String previous = styleSignature(previousRows.get(0), maxColumn);
+		String beforePrevious = styleSignature(previousRows.get(1), maxColumn);
+		String third = styleSignature(previousRows.get(2), maxColumn);
+		String fourth = styleSignature(previousRows.get(3), maxColumn);
+		if (!previous.equals(beforePrevious) && previous.equals(third) && beforePrevious.equals(fourth)) {
+			return previousRows.get(1);
+		}
+		return null;
+	}
+
+	private String styleSignature(Row row, int maxColumn) {
+		StringBuilder signature = new StringBuilder();
+		signature.append(row.getHeight()).append('|');
+		for (int c = 0; c < maxColumn; c++) {
+			Cell cell = row.getCell(c);
+			if (cell == null) {
+				signature.append("null;");
+				continue;
+			}
+			CellStyle style = cell.getCellStyle();
+			signature.append(style.getFillPattern()).append(',')
+				.append(style.getFillForegroundColor()).append(',')
+				.append(style.getBorderTop()).append(',')
+				.append(style.getBorderRight()).append(',')
+				.append(style.getBorderBottom()).append(',')
+				.append(style.getBorderLeft()).append(',')
+				.append(style.getDataFormat()).append(',')
+				.append(style.getFontIndexAsInt()).append(',')
+				.append(style.getAlignment()).append(',')
+				.append(style.getVerticalAlignment()).append(',')
+				.append(style.getWrapText()).append(';');
+		}
+		return signature.toString();
+	}
+
+	private boolean isSummaryRow(Row row) {
+		for (Cell cell : row) {
+			if (cell.getCellType() == CellType.FORMULA) {
+				return true;
+			}
+		}
+		String first = formatter.formatCellValue(row.getCell(0)).trim().toLowerCase(Locale.ROOT);
+		return SUMMARY_LABELS.contains(first);
+	}
+
+	private int headerColumnCount(Sheet sheet) {
+		Row header = requireHeaderRow(sheet);
+		return header == null || header.getLastCellNum() < 0 ? 0 : header.getLastCellNum();
+	}
+
+	private void formatHeader(Sheet sheet, Op op) {
+		Row header = requireHeaderRow(sheet);
+		for (Cell cell : header) {
+			applyStyle(cell, op, true);
+		}
+	}
+
+	private void formatColumn(Sheet sheet, Op op) {
+		int columnIndex = requireColumn(sheet, op.column());
+		if (op.width() != null) {
+			applyColumnWidth(sheet, columnIndex, op.width());
+		}
+		for (int r = firstDataRow(sheet); r <= lastContentRow(sheet); r++) {
+			Row row = sheet.getRow(r);
+			if (row == null) {
+				continue;
+			}
+			Cell cell = row.getCell(columnIndex);
+			if (cell != null) {
+				applyStyle(cell, op, false);
+			}
+		}
+	}
+
+	private void highlightRows(Sheet sheet, Op op) {
+		int columnIndex = requireColumn(sheet, op.column());
+		validateFilterCondition(op);
+		for (int r = firstDataRow(sheet); r <= lastContentRow(sheet); r++) {
+			Row row = sheet.getRow(r);
+			if (row == null) {
+				continue;
+			}
+			String value = formatter.formatCellValue(row.getCell(columnIndex)).trim();
+			if (!matchesFilter(value, op)) {
+				continue;
+			}
+			for (Cell cell : row) {
+				applyStyle(cell, op, false);
+			}
+		}
+	}
+
+	private void setColumnWidth(Sheet sheet, Op op) {
+		int columnIndex = requireColumn(sheet, op.column());
+		if (op.width() == null) {
+			throw new UnsupportedEditException("열 너비 조정에는 width가 필요합니다");
+		}
+		applyColumnWidth(sheet, columnIndex, op.width());
+	}
+
+	private void applyColumnWidth(Sheet sheet, int columnIndex, double width) {
+		if (width <= 0 || width > 100) {
+			throw new UnsupportedEditException("열 너비는 0보다 크고 100 이하여야 합니다");
+		}
+		sheet.setColumnWidth(columnIndex, (int) Math.round(width * 256));
+	}
+
+	private void applyStyle(Cell cell, Op op, boolean defaultHeaderBold) {
+		XSSFWorkbook workbook = (XSSFWorkbook) cell.getSheet().getWorkbook();
+		XSSFCellStyle style = workbook.createCellStyle();
+		style.cloneStyleFrom(cell.getCellStyle());
+
+		if (op.backgroundColor() != null && !op.backgroundColor().isBlank()) {
+			style.setFillForegroundColor(toColor(op.backgroundColor().trim()));
+			style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+		}
+		if (Boolean.TRUE.equals(op.border())) {
+			style.setBorderTop(BorderStyle.THIN);
+			style.setBorderRight(BorderStyle.THIN);
+			style.setBorderBottom(BorderStyle.THIN);
+			style.setBorderLeft(BorderStyle.THIN);
+		}
+		if (op.numberFormat() != null && !op.numberFormat().isBlank()) {
+			style.setDataFormat(workbook.getCreationHelper().createDataFormat().getFormat(op.numberFormat().trim()));
+		}
+
+		Boolean bold = op.bold() != null ? op.bold() : (defaultHeaderBold ? Boolean.TRUE : null);
+		if (bold != null || (op.fontColor() != null && !op.fontColor().isBlank())) {
+			style.setFont(copyFont(workbook, cell.getCellStyle(), bold, op.fontColor()));
+		}
+		cell.setCellStyle(style);
+	}
+
+	private XSSFFont copyFont(XSSFWorkbook workbook, CellStyle baseStyle, Boolean bold, String fontColor) {
+		Font base = workbook.getFontAt(baseStyle.getFontIndexAsInt());
+		XSSFFont font = workbook.createFont();
+		font.setFontName(base.getFontName());
+		font.setFontHeight(base.getFontHeight());
+		font.setItalic(base.getItalic());
+		font.setStrikeout(base.getStrikeout());
+		font.setTypeOffset(base.getTypeOffset());
+		font.setUnderline(base.getUnderline());
+		font.setCharSet(base.getCharSet());
+		font.setBold(bold != null ? bold : base.getBold());
+		if (fontColor != null && !fontColor.isBlank()) {
+			font.setColor(toColor(fontColor.trim()));
+		} else {
+			font.setColor(base.getColor());
+		}
+		return font;
+	}
+
+	private XSSFColor toColor(String raw) {
+		String normalized = raw.startsWith("#") ? raw.substring(1) : raw;
+		normalized = NAMED_COLORS.getOrDefault(normalized.toLowerCase(Locale.ROOT), normalized);
+		if (!normalized.matches("[0-9a-fA-F]{6}")) {
+			throw new UnsupportedEditException("지원하지 않는 색상 값입니다: " + raw);
+		}
+		byte[] rgb = new byte[] {
+			(byte) Integer.parseInt(normalized.substring(0, 2), 16),
+			(byte) Integer.parseInt(normalized.substring(2, 4), 16),
+			(byte) Integer.parseInt(normalized.substring(4, 6), 16)
+		};
+		return new XSSFColor(rgb, null);
 	}
 
 	/** 숫자 셀이 숫자로 유지될 수 있으면 숫자 타입으로 다시 써서 엑셀 수식·정렬 호환을 지킵니다. */
@@ -336,13 +733,14 @@ public class ExcelEditExecutor {
 	 */
 	private void sortRows(Sheet sheet, Op op) {
 		int columnIndex = requireColumn(sheet, op.column());
-		int lastRow = sheet.getLastRowNum();
-		if (lastRow < FIRST_DATA_ROW) {
+		int firstDataRow = firstDataRow(sheet);
+		int lastRow = lastContentRow(sheet);
+		if (lastRow < firstDataRow) {
 			return;
 		}
 
 		List<CapturedRow> captured = new ArrayList<>();
-		for (int r = FIRST_DATA_ROW; r <= lastRow; r++) {
+		for (int r = firstDataRow; r <= lastRow; r++) {
 			captured.add(captureRow(sheet.getRow(r), columnIndex));
 		}
 
@@ -361,7 +759,7 @@ public class ExcelEditExecutor {
 		captured.sort(comparator);
 
 		for (int i = 0; i < captured.size(); i++) {
-			writeRow(sheet, FIRST_DATA_ROW + i, captured.get(i));
+			writeRow(sheet, firstDataRow + i, captured.get(i));
 		}
 	}
 
