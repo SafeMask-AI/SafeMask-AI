@@ -82,7 +82,7 @@
 				</div>
 				<button type="button" class="preview-close" id="previewCancelButton" title="취소">&times;</button>
 			</div>
-			<pre class="preview-text" id="previewText"></pre>
+			<div class="preview-detail" id="previewText"></div>
 			<div class="manual-mask">
 				<input type="text" id="manualMaskValue" placeholder="추가로 가릴 단어를 입력하세요">
 				<select id="manualMaskType">
@@ -90,9 +90,26 @@
 					<option value="NAME">이름</option>
 					<option value="PHONE">전화번호</option>
 					<option value="EMAIL">이메일</option>
+					<option value="RRN">주민/외국인등록번호</option>
+					<option value="CARD_NUMBER">카드번호</option>
 					<option value="ADDRESS">주소</option>
 					<option value="EMPLOYEE_NO">사번</option>
 					<option value="ACCOUNT_NUMBER">계좌번호</option>
+					<option value="IP">IP 주소</option>
+					<option value="PASSPORT">여권번호</option>
+					<option value="DRIVER_LICENSE">운전면허번호</option>
+					<option value="VEHICLE_NUMBER">차량번호</option>
+					<option value="FINANCIAL_RESULT">공시 전 재무/실적</option>
+					<option value="COST_PRICE">원가/가격 정보</option>
+					<option value="CONTRACT_AMOUNT">계약/거래 조건</option>
+					<option value="LEGAL_DOCUMENT">법무/소송 정보</option>
+					<option value="TRADE_SECRET">영업비밀/전략</option>
+					<option value="TECH_IDENTIFIER">기술/인프라 정보</option>
+					<option value="SQL_QUERY">SQL 쿼리 정보</option>
+					<option value="SECURITY_SECRET">보안 시크릿</option>
+					<option value="HR_COMPENSATION">인사/급여 정보</option>
+					<option value="CUSTOMER_ACCOUNT">고객/거래처 정보</option>
+					<option value="INTERNAL_DOC_ID">내부 문서/관리번호</option>
 				</select>
 				<button type="button" class="secondary-button" id="manualMaskAddButton">추가</button>
 			</div>
@@ -102,6 +119,20 @@
 				<button type="button" class="primary-button" id="previewApproveButton">이대로 전송</button>
 			</div>
 		</section>
+
+		<div class="masking-detail-modal" id="maskingDetailModal" hidden>
+			<div class="masking-detail-backdrop" id="maskingDetailBackdrop"></div>
+			<section class="masking-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="maskingDetailTitle">
+				<div class="masking-detail-header">
+					<div>
+						<p class="masking-detail-title" id="maskingDetailTitle">마스킹 상세보기</p>
+						<p class="masking-detail-sub" id="maskingDetailSummary"></p>
+					</div>
+					<button type="button" class="masking-detail-close" id="maskingDetailCloseButton" title="닫기">&times;</button>
+				</div>
+				<div class="masking-detail-body" id="maskingDetailBody"></div>
+			</section>
+		</div>
 
 		<footer class="composer">
 			<ul class="attachment-list" id="attachmentList" hidden></ul>

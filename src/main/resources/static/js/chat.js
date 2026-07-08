@@ -25,6 +25,33 @@
 		pdf: { label: 'PDF', kind: 'pdf', mark: 'PDF' }
 	};
 
+	const MASKING_TYPE_LABELS = {
+		NAME: '이름',
+		PHONE: '전화번호',
+		EMAIL: '이메일',
+		RRN: '주민/외국인등록번호',
+		CARD_NUMBER: '카드번호',
+		ACCOUNT_NUMBER: '계좌번호',
+		ADDRESS: '주소',
+		EMPLOYEE_NO: '사번',
+		IP: 'IP 주소',
+		PASSPORT: '여권번호',
+		DRIVER_LICENSE: '운전면허번호',
+		VEHICLE_NUMBER: '차량번호',
+		FINANCIAL_RESULT: '공시 전 재무/실적',
+		COST_PRICE: '원가/가격 정보',
+		CONTRACT_AMOUNT: '계약/거래 조건',
+		LEGAL_DOCUMENT: '법무/소송 정보',
+		TRADE_SECRET: '영업비밀/전략',
+		TECH_IDENTIFIER: '기술/인프라 정보',
+		SQL_QUERY: 'SQL 쿼리 정보',
+		SECURITY_SECRET: '보안 시크릿',
+		HR_COMPENSATION: '인사/급여 정보',
+		CUSTOMER_ACCOUNT: '고객/거래처 정보',
+		INTERNAL_DOC_ID: '내부 문서/관리번호',
+		CUSTOM: '사용자 지정'
+	};
+
 	const name = localStorage.getItem('memberName') || '사용자';
 	const department = localStorage.getItem('memberDepartment') || '';
 
@@ -51,6 +78,11 @@
 	const manualMaskType = document.getElementById('manualMaskType');
 	const manualMaskAddButton = document.getElementById('manualMaskAddButton');
 	const manualMaskList = document.getElementById('manualMaskList');
+	const maskingDetailModal = document.getElementById('maskingDetailModal');
+	const maskingDetailBackdrop = document.getElementById('maskingDetailBackdrop');
+	const maskingDetailCloseButton = document.getElementById('maskingDetailCloseButton');
+	const maskingDetailSummary = document.getElementById('maskingDetailSummary');
+	const maskingDetailBody = document.getElementById('maskingDetailBody');
 	const newChatButton = document.querySelector('.new-chat-button');
 	const recentList = document.getElementById('recentList');
 	const dropOverlay = document.getElementById('dropOverlay');
@@ -80,6 +112,22 @@
 	fileInput.addEventListener('change', function () {
 		addFiles(Array.from(fileInput.files || []));
 		fileInput.value = '';
+	});
+	maskingDetailCloseButton.addEventListener('click', closeMaskingDetailModal);
+	maskingDetailBackdrop.addEventListener('click', closeMaskingDetailModal);
+	maskingDetailModal.addEventListener('wheel', function (event) {
+		if (maskingDetailModal.hidden) {
+			return;
+		}
+		if (!maskingDetailBody.contains(event.target)) {
+			event.preventDefault();
+			maskingDetailBody.scrollTop += event.deltaY;
+		}
+	}, { passive: false });
+	document.addEventListener('keydown', function (event) {
+		if (event.key === 'Escape' && !maskingDetailModal.hidden) {
+			closeMaskingDetailModal();
+		}
 	});
 
 	['dragenter', 'dragover'].forEach(function (eventName) {
@@ -932,37 +980,282 @@
 				const detection = (data.detections || []).find(function (item) {
 					return item.type === type;
 				});
-				return `${detection ? detection.displayName : type} ${count}건`;
+				return `${getMaskingTypeLabel(type, detection)} ${count}건`;
 			})
 			.join(', ');
 
 		previewSummary.textContent = summaryText
 			? `${summaryText}이 탐지되어 안전한 토큰으로 바뀝니다.`
 			: '첨부 파일 내용을 확인했습니다. 추가로 가릴 항목이 있으면 지정한 뒤 전송하세요.';
-		previewText.textContent = buildPreviewSamples(data, totalCount);
+		renderPreviewDetails(data, totalCount);
 		renderManualMasks();
 		maskingPreview.hidden = false;
 	}
 
-	function buildPreviewSamples(data, totalCount) {
+	function renderPreviewDetails(data, totalCount) {
 		const detections = data.detections || [];
+		previewText.innerHTML = '';
+
 		if (detections.length === 0) {
-			return '자동 탐지된 민감정보는 없습니다. 필요한 경우 아래에서 직접 추가 마스킹할 수 있습니다.';
+			const empty = document.createElement('p');
+			empty.className = 'preview-empty';
+			empty.textContent = '자동 탐지된 민감정보는 없습니다. 필요한 경우 아래에서 직접 추가 마스킹할 수 있습니다.';
+			previewText.appendChild(empty);
+			return;
 		}
+
+		const summaryList = document.createElement('div');
+		summaryList.className = 'preview-type-list';
+		Object.entries(data.summary || {}).forEach(function ([type, count]) {
+			const detection = detections.find(function (item) {
+				return item.type === type;
+			});
+			const chip = document.createElement('span');
+			chip.className = 'preview-type-chip';
+			chip.textContent = `${getMaskingTypeLabel(type, detection)} ${count}건`;
+			summaryList.appendChild(chip);
+		});
+		previewText.appendChild(summaryList);
+
+		const sampleList = document.createElement('div');
+		sampleList.className = 'preview-sample-list';
+		const original = pendingPreview ? pendingPreview.content : '';
+		detections.slice(0, 5).forEach(function (detection) {
+			sampleList.appendChild(createDetectionSample(detection, original));
+		});
+		previewText.appendChild(sampleList);
+
+		if (totalCount > 5) {
+			const sampleMore = document.createElement('p');
+			sampleMore.className = 'preview-sample-more';
+			sampleMore.textContent = `대표 ${Math.min(5, detections.length)}건만 먼저 보여드립니다. 전체 내역은 상세보기에서 확인하세요.`;
+			previewText.appendChild(sampleMore);
+		}
+
+		const detailToggle = document.createElement('button');
+		detailToggle.type = 'button';
+		detailToggle.className = 'preview-detail-toggle';
+		detailToggle.textContent = '상세보기';
+		previewText.appendChild(detailToggle);
+
+		detailToggle.addEventListener('click', function () {
+			openMaskingDetailModal(data, totalCount);
+		});
+	}
+
+	function createDetectionSample(detection, original) {
+		const row = document.createElement('div');
+		row.className = 'preview-sample-row';
+
+		const type = document.createElement('span');
+		type.className = 'preview-sample-type';
+		type.textContent = getMaskingTypeLabel(detection.type, detection);
+
+		const flow = document.createElement('span');
+		flow.className = 'preview-sample-flow';
+		flow.textContent = `${getDetectionOriginalValue(detection, original)} -> ${formatTokenForDisplay(detection)}`;
+
+		row.append(type, flow);
+		return row;
+	}
+
+	function openMaskingDetailModal(data, totalCount) {
+		const detections = data.detections || [];
+		maskingDetailBody.innerHTML = '';
+		maskingDetailSummary.textContent = `상세 표시 ${detections.length}건 / 탐지 요약 ${totalCount}건`;
 
 		const original = pendingPreview ? pendingPreview.content : '';
-		const lines = detections.slice(0, 8).map(function (detection) {
-			if (pendingPreview && pendingPreview.hasFiles) {
-				return `${detection.displayName}: 첨부 내용 내 항목 → ${detection.token}`;
-			}
-			const originalValue = original.slice(detection.startIndex, detection.endIndex);
-			return `${detection.displayName}: ${originalValue} → ${detection.token}`;
+		const groups = groupDetections(detections);
+		groups.forEach(function (group, groupIndex) {
+			const section = document.createElement('section');
+			section.className = 'masking-detail-group';
+
+			const header = document.createElement('button');
+			header.type = 'button';
+			header.className = 'masking-detail-group-header';
+
+			const title = document.createElement('div');
+			const name = document.createElement('p');
+			name.className = 'masking-detail-group-title';
+			name.textContent = group.label;
+			const meta = document.createElement('p');
+			meta.className = 'masking-detail-group-meta';
+			meta.textContent = `${group.items.length}건 · ${group.typeLabel} · ${describeMaskingGroup(group.type)}`;
+			title.append(name, meta);
+
+			const count = document.createElement('span');
+			count.className = 'masking-detail-count';
+			count.textContent = groupIndex === 0 ? '접기' : '열기';
+			header.append(title, count);
+			section.appendChild(header);
+
+			const grid = document.createElement('div');
+			grid.className = 'masking-detail-grid';
+			grid.hidden = groupIndex !== 0;
+			group.items.forEach(function (detection) {
+				grid.appendChild(createDetectionRow(detection, original, detection.displayIndex));
+			});
+			section.appendChild(grid);
+			header.addEventListener('click', function () {
+				const expanded = grid.hidden;
+				grid.hidden = !expanded;
+				count.textContent = expanded ? '접기' : '열기';
+			});
+			maskingDetailBody.appendChild(section);
 		});
 
-		if (totalCount > lines.length) {
-			lines.push(`외 ${totalCount - lines.length}건은 같은 방식으로 마스킹됩니다.`);
+		maskingDetailModal.hidden = false;
+		document.body.classList.add('modal-open');
+	}
+
+	function closeMaskingDetailModal() {
+		maskingDetailModal.hidden = true;
+		maskingDetailBody.innerHTML = '';
+		document.body.classList.remove('modal-open');
+	}
+
+	function groupDetections(detections) {
+		const grouped = new Map();
+		detections.forEach(function (detection, index) {
+			const detailLabel = getDetectionDetailLabel(detection);
+			const key = `${detection.type}:${detailLabel}`;
+			if (!grouped.has(key)) {
+				grouped.set(key, {
+					type: detection.type,
+					label: detailLabel,
+					typeLabel: getMaskingTypeLabel(detection.type, detection),
+					items: []
+				});
+			}
+			grouped.get(key).items.push({
+				...detection,
+				displayIndex: index
+			});
+		});
+		return Array.from(grouped.values());
+	}
+
+	function createDetectionRow(detection, original, index) {
+		const row = document.createElement('div');
+		row.className = 'masking-detail-row';
+
+		const order = document.createElement('span');
+		order.className = 'masking-detail-row-order';
+		order.textContent = `${index + 1}`;
+
+		const type = document.createElement('span');
+		type.className = 'masking-detail-row-type';
+		type.textContent = getDetectionDetailLabel(detection);
+
+		const before = document.createElement('span');
+		before.className = 'masking-detail-row-value';
+		before.textContent = getDetectionOriginalValue(detection, original);
+
+		const after = document.createElement('span');
+		after.className = 'masking-detail-row-token';
+		after.textContent = formatTokenForDisplay(detection);
+
+		row.append(order, type, before, after);
+		return row;
+	}
+
+	function createDetectionCard(detection, original, index) {
+		const card = document.createElement('article');
+		card.className = 'preview-detection-card';
+
+		const header = document.createElement('div');
+		header.className = 'preview-detection-head';
+
+		const type = document.createElement('span');
+		type.className = 'preview-detection-type';
+		type.textContent = getDetectionDetailLabel(detection);
+
+		const order = document.createElement('span');
+		order.className = 'preview-detection-order';
+		order.textContent = `${index + 1}번째`;
+
+		header.append(type, order);
+		card.appendChild(header);
+
+		const before = document.createElement('div');
+		before.className = 'preview-detection-row';
+		before.append(createPreviewLabel('탐지값'), createPreviewValue(getDetectionOriginalValue(detection, original)));
+
+		const after = document.createElement('div');
+		after.className = 'preview-detection-row';
+		after.append(createPreviewLabel('변경값'), createPreviewValue(formatTokenForDisplay(detection), true));
+
+		card.append(before, after);
+		return card;
+	}
+
+	function createPreviewLabel(text) {
+		const label = document.createElement('span');
+		label.className = 'preview-detection-label';
+		label.textContent = text;
+		return label;
+	}
+
+	function createPreviewValue(text, token) {
+		const value = document.createElement('span');
+		value.className = token ? 'preview-detection-value token' : 'preview-detection-value';
+		value.textContent = text;
+		return value;
+	}
+
+	function getMaskingTypeLabel(type, detection) {
+		return (detection && detection.displayName) || MASKING_TYPE_LABELS[type] || type;
+	}
+
+	function getDetectionDetailLabel(detection) {
+		if (detection.detailName === 'SQL 한정 식별자') {
+			return 'SQL 컬럼/스키마 식별자';
 		}
-		return lines.join('\n');
+		if (detection.detailName === 'SQL FROM 대상'
+			|| detection.detailName === 'SQL 테이블명'
+			|| detection.detailName === 'SQL 테이블명(FROM 목록)'
+			|| detection.detailName === 'SQL 테이블명(FROM)') {
+			return 'SQL 테이블명(FROM)';
+		}
+		if (detection.detailName === 'SQL JOIN 대상') {
+			return 'SQL 테이블명(JOIN)';
+		}
+		if (detection.detailName === 'SQL UPDATE 대상') {
+			return 'SQL 테이블명(UPDATE)';
+		}
+		if (detection.detailName) {
+			return detection.detailName;
+		}
+		return getMaskingTypeLabel(detection.type, detection);
+	}
+
+	function describeMaskingGroup(type) {
+		switch (type) {
+			case 'SQL_QUERY':
+				return '쿼리 구조는 유지하고 테이블명, 컬럼명, 스키마명 같은 식별자만 토큰으로 바꿉니다.';
+			case 'SECURITY_SECRET':
+				return '키, 토큰, 접속 문자열은 사용 목적과 무관하게 강하게 마스킹합니다.';
+			case 'TECH_IDENTIFIER':
+				return '내부 URL, 서버명, 저장소 경로처럼 환경을 드러내는 값을 가립니다.';
+			case 'FINANCIAL_RESULT':
+			case 'COST_PRICE':
+			case 'CONTRACT_AMOUNT':
+			case 'HR_COMPENSATION':
+				return '일반 숫자는 유지하고 민감 문맥에 붙은 금액·비율만 가립니다.';
+			default:
+				return '원문 대신 안전한 토큰이 AI로 전달됩니다.';
+		}
+	}
+
+	function formatTokenForDisplay(detection) {
+		return detection.token;
+	}
+
+	function getDetectionOriginalValue(detection, original) {
+		if (pendingPreview && pendingPreview.hasFiles) {
+			return '첨부 파일에서 탐지된 항목';
+		}
+		return original.slice(detection.startIndex, detection.endIndex);
 	}
 
 	function clearPreviewState(options) {
@@ -974,7 +1267,7 @@
 		}
 		maskingPreview.hidden = true;
 		previewSummary.textContent = '';
-		previewText.textContent = '';
+		previewText.innerHTML = '';
 		manualMaskValue.value = '';
 		pendingPreview = null;
 		manualMasks = [];
@@ -1336,7 +1629,7 @@
 		manualMaskList.innerHTML = '';
 		manualMasks.forEach(function (mask, index) {
 			const item = document.createElement('li');
-			item.textContent = `${mask.value} `;
+			item.textContent = `${getMaskingTypeLabel(mask.type)} · ${mask.value} `;
 			const removeButton = document.createElement('button');
 			removeButton.type = 'button';
 			removeButton.textContent = '×';

@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
  * </ul>
  */
 @Slf4j
+@Order(20)
 @Component
 @RequiredArgsConstructor
 public class MaskingRuleSeeder implements ApplicationRunner {
@@ -96,6 +98,7 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 	public static final String NAME_IN_SENTENCE_RULE_NAME = "이름(문장 속)";
 	public static final String CARD_CONTIGUOUS_RULE_NAME = "카드번호(무구분)";
 	public static final String PASSPORT_RULE_NAME = "여권번호";
+	public static final String SQL_QUALIFIED_IDENTIFIER_RULE_NAME = "SQL 한정 식별자";
 
 	/**
 	 * 이름 탐지 휴리스틱 3 (문장 속, 사전 검증 필수):
@@ -123,6 +126,15 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 			+ "(?:\\s[가-힣0-9]{1,10}(?:시|군|구|읍|면|동|리|가))*"
 			+ "\\s[가-힣A-Za-z0-9]*(?:로|길)\\s?\\d+(?:-\\d+)?"
 			+ "(?:\\s?\\d+(?:동|호|층))*";
+
+	/** 문맥형 금액 규칙에서 공통으로 쓰는 원화·비율 수치 */
+	private static final String BUSINESS_AMOUNT_PATTERN =
+		"(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?\\s?(?:원|만원|억원|조원|%)";
+
+	/** SQL 식별자: 예약어 자체는 DetectionPolicies에서 제외합니다. */
+	private static final String SQL_IDENTIFIER_PATTERN = "[A-Za-z_][A-Za-z0-9_$]*";
+	private static final String SQL_TABLE_REFERENCE_PATTERN =
+		SQL_IDENTIFIER_PATTERN + "(?:\\." + SQL_IDENTIFIER_PATTERN + ")?(?:@" + SQL_IDENTIFIER_PATTERN + ")?";
 
 	private final MaskingRuleRepository maskingRuleRepository;
 
@@ -158,6 +170,50 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 	 */
 	public static List<MaskingRule> defaultRules() {
 		return List.of(
+			MaskingRule.create("Private Key 블록", MaskingType.SECURITY_SECRET,
+				"-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----", 1,
+				"PEM 형식 개인키 전체 블록. 키 원문은 어떤 작업 목적에서도 외부 전송되면 안 되므로 최우선으로 탐지합니다."),
+
+			MaskingRule.create("JWT 토큰", MaskingType.SECURITY_SECRET,
+				"\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b", 2,
+				"JSON Web Token. 헤더·페이로드·서명 3구간이 점으로 구분된 형식만 탐지합니다."),
+
+			MaskingRule.create("AWS Access Key", MaskingType.SECURITY_SECRET,
+				"\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b", 3,
+				"AWS 장기/임시 Access Key ID. 오탐 방지를 위해 알려진 접두사와 길이를 요구합니다."),
+
+			MaskingRule.create("JDBC URL", MaskingType.SECURITY_SECRET,
+				"\\bjdbc:[A-Za-z0-9]+://[^\\s\"']+", 4,
+				"DB 접속 문자열. 서버·DB명·계정 정보가 함께 포함될 수 있어 보안 시크릿으로 취급합니다."),
+
+			MaskingRule.create("API/Secret/Access Token 값", MaskingType.SECURITY_SECRET,
+				"(?i)\\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|pwd)\\s*[:=]\\s*[\"']?[^\\s\"',;]{8,}", 5,
+				"API Key, Secret Key, Access Token, Refresh Token, 비밀번호 대입 구문. 키 이름 문맥이 있을 때만 값을 포함해 탐지합니다."),
+
+			MaskingRule.create("S3 URI", MaskingType.TECH_IDENTIFIER,
+				"\\bs3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](?:/[^\\s\"']*)?", 6,
+				"S3 버킷/객체 경로. 내부 저장소명 노출을 막기 위해 기술 식별자로 마스킹합니다."),
+
+			MaskingRule.create("내부 API URL", MaskingType.TECH_IDENTIFIER,
+				"https?://(?:localhost|(?:[A-Za-z0-9-]+\\.)*(?:internal|local|corp|intra|dev|stg|stage|prod|admin)[A-Za-z0-9.-]*)(?::\\d{2,5})?(?:/[^\\s\"']*)?", 7,
+				"내부망·개발/운영 도메인으로 보이는 URL. 일반 공개 URL 오탐을 줄이기 위해 내부 문맥 단어를 요구합니다."),
+
+			MaskingRule.create(SQL_QUALIFIED_IDENTIFIER_RULE_NAME, MaskingType.SQL_QUERY,
+				"\\b" + SQL_IDENTIFIER_PATTERN + "\\." + SQL_IDENTIFIER_PATTERN + "\\b", 8,
+				"schema.table 또는 alias.column 형태의 SQL 한정 식별자. 쿼리 구조는 유지하되 내부 DB/컬럼 이름을 가립니다."),
+
+			MaskingRule.create("SQL FROM 대상", MaskingType.SQL_QUERY,
+				"(?i)(?<=\\bFROM\\s)" + SQL_TABLE_REFERENCE_PATTERN, 9,
+				"SELECT FROM 뒤 테이블명. SQL 전체가 아니라 테이블 식별자만 마스킹합니다."),
+
+			MaskingRule.create("SQL JOIN 대상", MaskingType.SQL_QUERY,
+				"(?i)(?<=\\bJOIN\\s)" + SQL_TABLE_REFERENCE_PATTERN, 9,
+				"JOIN 뒤 테이블명. 조인 구조는 유지하고 테이블 식별자만 마스킹합니다."),
+
+			MaskingRule.create("SQL UPDATE 대상", MaskingType.SQL_QUERY,
+				"(?i)(?<=\\bUPDATE\\s)" + SQL_TABLE_REFERENCE_PATTERN, 9,
+				"UPDATE 뒤 테이블명. 쿼리 최적화·오류 분석에 필요한 구조는 유지합니다."),
+
 			MaskingRule.create("주민등록번호", MaskingType.RRN,
 				"(?<!\\d)\\d{6}-[1-8]\\d{6}(?!\\d)", 10,
 				"하이픈 형식의 주민등록번호·외국인등록번호. 뒷자리 첫 숫자(성별 코드)가 "
@@ -216,6 +272,26 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 				"시·도로 시작하는 도로명 주소(상세 동/호/층 포함). 이름 규칙보다 먼저 적용해 "
 					+ "주소 안의 지명(강남구 등)이 이름으로 오탐되는 것을 구간 선점으로 차단합니다."),
 
+			MaskingRule.create("공시 전 재무/실적 수치", MaskingType.FINANCIAL_RESULT,
+				"(?:매출|영업이익|순이익|EBITDA|실적|전망치|목표치|내부\\s?KPI|예산|투자계획|CAPEX|OPEX)\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN, 56,
+				"공시 전일 수 있는 재무·실적·예산 수치. 일반 금액은 유지하고 재무 문맥의 수치만 탐지합니다."),
+
+			MaskingRule.create("원가/가격/마진 정보", MaskingType.COST_PRICE,
+				"(?:원가|공급가|납품단가|판매단가|마진율|할인율|견적가|입찰가|리베이트|수수료율)\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN, 57,
+				"원가·단가·마진·견적·입찰 문맥의 금액/비율. 계산용 일반 금액은 과도하게 가리지 않습니다."),
+
+			MaskingRule.create("계약/거래 조건 금액", MaskingType.CONTRACT_AMOUNT,
+				"(?:계약금액|계약금|위약금|보증금|선급금|중도금|잔금|지급조건)\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN, 58,
+				"계약서·거래 조건에서 금액 자체가 민감한 항목만 탐지합니다."),
+
+			MaskingRule.create("인사/급여 금액", MaskingType.HR_COMPENSATION,
+				"(?:연봉|급여|성과급|퇴직금|상여금|수당)\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN, 59,
+				"개인 식별자와 결합되면 민감도가 높은 급여·보상성 금액."),
+
+			MaskingRule.create("법무/소송 식별 정보", MaskingType.LEGAL_DOCUMENT,
+				"(?:사건번호\\s*[:：]?\\s*\\d{2,4}[가-힣]{1,6}\\d{1,8}|법무법인\\s?[가-힣A-Za-z0-9]{2,20}|합의금\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN + ")", 59,
+				"소송 사건번호, 법무법인명, 합의금 등 법무 문서에서 민감한 식별 정보."),
+
 			MaskingRule.create("이름(호칭 문맥)", MaskingType.NAME,
 				NAME_WITH_TITLE_PATTERN, 60,
 				"흔한 성씨 + 두 글자 이름 + 뒤따르는 호칭/직급으로 세 글자 성명을 탐지하는 휴리스틱. "
@@ -238,7 +314,19 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 			MaskingRule.create("차량번호", MaskingType.VEHICLE_NUMBER,
 				"(?<![\\d가-힣])\\d{2,3}[가나다라마바사아자카타파거너더러머버서어저고노도로모보소오조구누두루무부수우주하허호배]\\s?\\d{4}(?!\\d)", 65,
 				"자동차 등록번호판(숫자 2~3자리 + 용도 한글 1자 + 숫자 4자리). 번호판 용도 기호로 쓰이는 "
-					+ "한글만 허용하고, 주소 규칙보다 뒤에 적용해 주소 속 번지·호수가 오탐되지 않게 합니다.")
+					+ "한글만 허용하고, 주소 규칙보다 뒤에 적용해 주소 속 번지·호수가 오탐되지 않게 합니다."),
+
+			MaskingRule.create("고객/거래처 식별 정보", MaskingType.CUSTOMER_ACCOUNT,
+				"(?:고객사|거래처|계약상대방|파트너사)\\s*[:：]?\\s*(?:\\(주\\)|주식회사|㈜)?[가-힣A-Za-z0-9][가-힣A-Za-z0-9 .&()㈜-]{1,24}", 70,
+				"고객사·거래처·계약 상대방 이름. 문맥 키워드가 있을 때만 탐지해 일반 회사명 오탐을 줄입니다."),
+
+			MaskingRule.create("영업비밀/전략 문서명", MaskingType.TRADE_SECRET,
+				"(?:고객\\s?리스트|파트너\\s?리스트|영업\\s?파이프라인|수주\\s?가능성|출시\\s?계획|제품\\s?로드맵|가격\\s?정책|경쟁사\\s?대응\\s?전략)", 71,
+				"문서 제목이나 요청문에 드러나는 영업비밀·전략 키워드. 문서 자체가 민감함을 표시합니다."),
+
+			MaskingRule.create("내부 문서/관리번호", MaskingType.INTERNAL_DOC_ID,
+				"(?:품의|결재|문서|프로젝트|발주|주문|송장|전표|세금계산서)(?:번호|코드)?\\s*[:：]?\\s*[A-Z가-힣]{0,8}-?\\d{2,}(?:-[A-Z0-9가-힣]+)*", 72,
+				"품의번호, 결재번호, 문서번호, 발주번호 등 회사 내부 추적 가능한 관리번호.")
 		);
 	}
 }

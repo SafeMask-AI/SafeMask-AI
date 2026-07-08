@@ -54,7 +54,6 @@ import org.springframework.web.multipart.MultipartFile;
 public class ChatMessageService {
 
 	private static final int CONTEXT_MESSAGE_LIMIT = 20;
-	private static final int PREVIEW_DETECTION_LIMIT = 20;
 
 	private final ChatRoomRepository chatRoomRepository;
 	private final ChatMessageRepository chatMessageRepository;
@@ -120,7 +119,6 @@ public class ChatMessageService {
 		MaskingResult maskingResult = applyMasking(chatRoom.getId(), request);
 		List<MaskingDetectionResponse> detections = maskingResult.detections()
 			.stream()
-			.limit(PREVIEW_DETECTION_LIMIT)
 			.map(MaskingDetectionResponse::from)
 			.toList();
 
