@@ -108,14 +108,40 @@ public class MaskingEngine {
 					continue;
 				}
 				String token = tokenAssigner.assign(rule.getType(), value);
-				detections.add(new Detection(rule.getType(), value, token, matcher.start(), matcher.end()));
+				detections.add(new Detection(rule.getType(), value, token, matcher.start(), matcher.end(),
+					normalizeRuleName(rule.getType(), rule.getName())));
 			}
 		}
 
+		addSqlIdentifierDetections(text, detections, tokenAssigner);
 		propagateDetectedValues(text, detections);
 
 		detections.sort(Comparator.comparingInt(Detection::startIndex));
 		return new MaskingResult(text, replaceWithTokens(text, detections), List.copyOf(detections));
+	}
+
+	private void addSqlIdentifierDetections(String text, List<Detection> detections, TokenAssigner tokenAssigner) {
+		for (SqlIdentifierExtractor.Item item : SqlIdentifierExtractor.extract(text)) {
+			if (overlapsAccepted(detections, item.start(), item.end())) {
+				continue;
+			}
+			String token = tokenAssigner.assign(MaskingType.SQL_QUERY, item.value());
+			detections.add(new Detection(MaskingType.SQL_QUERY, item.value(), token,
+				item.start(), item.end(), normalizeRuleName(MaskingType.SQL_QUERY, item.ruleName())));
+		}
+	}
+
+	private String normalizeRuleName(MaskingType type, String ruleName) {
+		if (type != MaskingType.SQL_QUERY) {
+			return ruleName;
+		}
+		return switch (ruleName) {
+			case "SQL FROM 대상", "SQL 테이블명", "SQL 테이블명(FROM 목록)" -> "SQL 테이블명(FROM)";
+			case "SQL JOIN 대상" -> "SQL 테이블명(JOIN)";
+			case "SQL UPDATE 대상" -> "SQL 테이블명(UPDATE)";
+			case "SQL 한정 식별자" -> "SQL 컬럼/스키마 식별자";
+			default -> ruleName;
+		};
 	}
 
 	/**
@@ -132,6 +158,11 @@ public class MaskingEngine {
 		Set<String> propagated = new HashSet<>();
 
 		for (Detection seed : seeds) {
+			// SQL 식별자는 CUSTOMER가 CUSTOMER_NAME 안에서 다시 잡히는 식의 부분 오탐 위험이 크다.
+			// 반복되는 SQL 객체는 스캐너/규칙이 위치별로 직접 탐지하고, 토큰 발급기가 같은 값을 같은 토큰으로 묶는다.
+			if (seed.type() == MaskingType.SQL_QUERY) {
+				continue;
+			}
 			// 두 글자 미만 값은 우연히 일치할 확률이 높아 전파하지 않음
 			if (seed.originalValue().length() < 2
 				|| !propagated.add(seed.type().name() + ":" + seed.originalValue())) {
@@ -145,7 +176,7 @@ public class MaskingEngine {
 				}
 				// 같은 (type, value)이므로 시드와 같은 토큰을 재사용 (토큰 발급기 호출 불필요)
 				detections.add(new Detection(seed.type(), seed.originalValue(), seed.token(),
-					matcher.start(), matcher.end()));
+					matcher.start(), matcher.end(), seed.ruleName()));
 			}
 		}
 	}
@@ -165,7 +196,7 @@ public class MaskingEngine {
 		Matcher matcher = Pattern.compile(Pattern.quote(value)).matcher(text);
 		while (matcher.find()) {
 			String token = tokenAssigner.assign(type, value);
-			detections.add(new Detection(type, value, token, matcher.start(), matcher.end()));
+			detections.add(new Detection(type, value, token, matcher.start(), matcher.end(), "수동 마스킹"));
 		}
 
 		return new MaskingResult(text, replaceWithTokens(text, detections), List.copyOf(detections));

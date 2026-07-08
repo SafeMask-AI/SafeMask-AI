@@ -43,6 +43,14 @@ public final class DetectionPolicies {
 	/** 여권번호 매칭 앞에서 이만큼을 살펴 제품코드 문맥인지 판단한다 */
 	private static final int PASSPORT_CONTEXT_WINDOW = 12;
 
+	/** SQL 한정 식별자 규칙에서 예약어·함수명을 테이블/컬럼명으로 오탐하지 않기 위한 제외 목록 */
+	private static final Set<String> SQL_RESERVED_WORDS = Set.of(
+		"SELECT", "FROM", "WHERE", "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "FULL", "ON",
+		"AND", "OR", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET", "INSERT", "INTO",
+		"UPDATE", "DELETE", "VALUES", "SET", "AS", "DISTINCT", "COUNT", "SUM", "AVG", "MIN",
+		"MAX", "DATE", "NOW", "CURRENT_DATE", "CURRENT_TIMESTAMP", "CASE", "WHEN", "THEN",
+		"ELSE", "END", "NULL", "TRUE", "FALSE", "CAST", "COALESCE", "NVL", "SUBSTR", "CONCAT");
+
 	private DetectionPolicies() {
 	}
 
@@ -69,6 +77,8 @@ public final class DetectionPolicies {
 				acceptName(rule.getName(), value, scan, givenNames);
 			case MaskingRuleSeeder.CARD_CONTIGUOUS_RULE_NAME -> passesLuhn(value);
 			case MaskingRuleSeeder.PASSPORT_RULE_NAME -> !isProductCodeContext(text, start);
+			case MaskingRuleSeeder.SQL_QUALIFIED_IDENTIFIER_RULE_NAME -> hasSqlContext(text, start)
+				&& isSqlIdentifier(value);
 			default -> true;
 		};
 	}
@@ -217,5 +227,30 @@ public final class DetectionPolicies {
 		String before = text.substring(Math.max(0, start - PASSPORT_CONTEXT_WINDOW), start);
 		return before.contains("제품") || before.contains("코드")
 			|| before.contains("품번") || before.contains("모델");
+	}
+
+	private static boolean isSqlIdentifier(String value) {
+		String[] parts = value.split("\\.");
+		if (parts.length != 2) {
+			return false;
+		}
+		for (String part : parts) {
+			if (part.isBlank() || SQL_RESERVED_WORDS.contains(part.toUpperCase())) {
+				return false;
+			}
+		}
+		String lastPart = parts[parts.length - 1].toUpperCase();
+		if ("NEXTVAL".equals(lastPart) || "CURRVAL".equals(lastPart)) {
+			return false;
+		}
+		return true;
+	}
+
+	private static boolean hasSqlContext(String text, int start) {
+		String window = text.substring(Math.max(0, start - 80), Math.min(text.length(), start + 80))
+			.toUpperCase();
+		return window.contains("SELECT ") || window.contains(" FROM ") || window.contains("\nFROM ")
+			|| window.contains(" JOIN ") || window.contains("\nJOIN ") || window.contains(" WHERE ")
+			|| window.contains("\nWHERE ") || window.contains(" UPDATE ") || window.contains("\nUPDATE ");
 	}
 }

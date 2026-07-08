@@ -53,6 +53,39 @@ public enum MaskingType {
 	/** 차량번호 (자동차 등록번호판) */
 	VEHICLE_NUMBER("차량번호", "VEHICLE"),
 
+	/** 공시 전 재무·실적 수치 */
+	FINANCIAL_RESULT("공시 전 재무/실적", "FINANCE"),
+
+	/** 원가·단가·견적·입찰 등 가격 조건 */
+	COST_PRICE("원가/가격 정보", "PRICE"),
+
+	/** 계약 금액·기간·지급 조건 */
+	CONTRACT_AMOUNT("계약/거래 조건", "CONTRACT"),
+
+	/** 법무·소송·분쟁 문서 정보 */
+	LEGAL_DOCUMENT("법무/소송 정보", "LEGAL"),
+
+	/** 영업비밀·사업 전략 */
+	TRADE_SECRET("영업비밀/전략", "TRADE_SECRET"),
+
+	/** DB·SQL·서버·내부 URL 등 기술 식별자 */
+	TECH_IDENTIFIER("기술/인프라 정보", "TECH"),
+
+	/** SQL 테이블·컬럼·스키마 등 쿼리 식별자 */
+	SQL_QUERY("SQL 쿼리 정보", "SQL"),
+
+	/** API Key, 토큰, 비밀번호, 개인키 등 보안 시크릿 */
+	SECURITY_SECRET("보안 시크릿", "SECRET"),
+
+	/** 급여·연봉·성과급 등 인사 민감 금액 */
+	HR_COMPENSATION("인사/급여 정보", "HR"),
+
+	/** 고객사·거래처·고객 등급 등 거래처 민감정보 */
+	CUSTOMER_ACCOUNT("고객/거래처 정보", "CUSTOMER"),
+
+	/** 품의번호·결재번호·문서번호 등 내부 관리번호 */
+	INTERNAL_DOC_ID("내부 문서/관리번호", "DOC_ID"),
+
 	/** 관리자가 등록한 커스텀 규칙 (프로젝트 코드명, 거래처명 등) */
 	CUSTOM("사용자 지정", "CUSTOM");
 

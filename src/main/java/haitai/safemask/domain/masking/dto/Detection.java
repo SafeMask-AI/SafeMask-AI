@@ -13,12 +13,14 @@ import haitai.safemask.domain.maskingentity.enums.MaskingType;
  * @param token         원본값을 대체한 마스킹 토큰 (예: [PHONE_001])
  * @param startIndex    원문 기준 탐지 시작 위치 (미리보기 하이라이트용)
  * @param endIndex      원문 기준 탐지 끝 위치 (exclusive)
+ * @param ruleName      탐지를 만든 규칙 이름 (화면 상세 설명용, 원본값 아님)
  */
 public record Detection(
 	MaskingType type,
 	String originalValue,
 	String token,
 	int startIndex,
-	int endIndex
+	int endIndex,
+	String ruleName
 ) {
 }

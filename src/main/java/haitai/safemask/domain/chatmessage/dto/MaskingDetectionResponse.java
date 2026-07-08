@@ -12,6 +12,7 @@ import haitai.safemask.domain.maskingentity.enums.MaskingType;
 public record MaskingDetectionResponse(
 	MaskingType type,
 	String displayName,
+	String detailName,
 	String token,
 	int startIndex,
 	int endIndex
@@ -20,9 +21,23 @@ public record MaskingDetectionResponse(
 		return new MaskingDetectionResponse(
 			detection.type(),
 			detection.type().getDisplayName(),
+			normalizeDetailName(detection.type(), detection.ruleName()),
 			detection.token(),
 			detection.startIndex(),
 			detection.endIndex()
 		);
+	}
+
+	private static String normalizeDetailName(MaskingType type, String detailName) {
+		if (type != MaskingType.SQL_QUERY) {
+			return detailName;
+		}
+		return switch (detailName) {
+			case "SQL FROM 대상", "SQL 테이블명", "SQL 테이블명(FROM 목록)" -> "SQL 테이블명(FROM)";
+			case "SQL JOIN 대상" -> "SQL 테이블명(JOIN)";
+			case "SQL UPDATE 대상" -> "SQL 테이블명(UPDATE)";
+			case "SQL 한정 식별자" -> "SQL 컬럼/스키마 식별자";
+			default -> detailName;
+		};
 	}
 }

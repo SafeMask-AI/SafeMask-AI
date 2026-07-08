@@ -354,7 +354,10 @@ class MaskingEngineTest {
 			assertThat(valid.summary()).containsEntry(MaskingType.CARD_NUMBER, 1L);
 
 			MaskingResult invalid = mask("주문번호 5105105105105101 조회 부탁");
-			assertThat(invalid.hasDetections()).isFalse();
+			assertThat(invalid.detections()
+				.stream()
+				.filter(detection -> detection.type() == MaskingType.CARD_NUMBER))
+				.isEmpty();
 		}
 
 		@Test
@@ -614,6 +617,191 @@ class MaskingEngineTest {
 			MaskingResult result = mask(header);
 
 			assertThat(result.hasDetections()).isFalse();
+		}
+	}
+
+	@Nested
+	@DisplayName("업무 민감정보 확장 탐지")
+	class BusinessSensitiveData {
+
+		@Test
+		@DisplayName("일반 입금 금액은 유지하고 이름만 마스킹한다")
+		void generalAmountPreserved() {
+			MaskingResult result = mask("김철수 50,000원 입금 확인");
+
+			assertThat(result.summary()).containsEntry(MaskingType.NAME, 1L);
+			assertThat(result.summary()).doesNotContainKey(MaskingType.COST_PRICE);
+			assertThat(result.summary()).doesNotContainKey(MaskingType.CONTRACT_AMOUNT);
+			assertThat(result.maskedText()).contains("50,000원");
+		}
+
+		@Test
+		@DisplayName("계약/원가/급여/공시 전 실적 문맥의 금액은 마스킹한다")
+		void sensitiveBusinessAmountsDetected() {
+			MaskingResult result = mask("""
+				2분기 영업이익 120억원 예상
+				A사 납품단가 48,000원
+				계약금액 3억원
+				홍길동 연봉 5,000만원
+				""");
+
+			assertThat(result.summary())
+				.containsEntry(MaskingType.FINANCIAL_RESULT, 1L)
+				.containsEntry(MaskingType.COST_PRICE, 1L)
+				.containsEntry(MaskingType.CONTRACT_AMOUNT, 1L)
+				.containsEntry(MaskingType.HR_COMPENSATION, 1L);
+			assertThat(result.maskedText())
+				.doesNotContain("영업이익 120억원")
+				.doesNotContain("납품단가 48,000원")
+				.doesNotContain("계약금액 3억원")
+				.doesNotContain("연봉 5,000만원");
+		}
+
+		@Test
+		@DisplayName("SQL은 전체를 지우지 않고 테이블/컬럼 식별자와 기존 개인정보만 마스킹한다")
+		void sqlStructurePreserved() {
+			MaskingResult result = mask("""
+				SELECT c.customer_name, o.order_amount
+				FROM production.customer_master c
+				JOIN sales.order_history o ON c.customer_id = o.customer_id
+				WHERE c.phone = '010-1234-5678'
+				""");
+
+			assertThat(result.summary())
+				.containsEntry(MaskingType.SQL_QUERY, 7L)
+				.containsEntry(MaskingType.PHONE, 1L);
+			assertThat(result.maskedText())
+				.contains("SELECT")
+				.contains("FROM")
+				.contains("JOIN")
+				.contains("WHERE")
+				.doesNotContain("customer_master")
+				.doesNotContain("order_history")
+				.doesNotContain("customer_name")
+				.doesNotContain("010-1234-5678");
+		}
+
+		@Test
+		@DisplayName("Oracle 콤마 조인 FROM 목록과 서브쿼리 FROM 테이블을 모두 탐지한다")
+		void oracleCommaJoinTablesDetected() {
+			MaskingResult result = mask("""
+				SELECT
+				       A.ORDER_ID                          AS ORDER_ID
+				     , A.ORDER_NO                          AS ORDER_NO
+				     , TO_CHAR(A.ORDER_DATE, 'YYYY-MM-DD') AS ORDER_DATE
+				     , B.CUSTOMER_NAME                     AS CUSTOMER_NAME
+				     , C.PRODUCT_NAME                      AS PRODUCT_NAME
+				     , A.ORDER_QTY * A.ORDER_PRICE         AS ORDER_AMOUNT
+				     , NVL(D.INVOICE_NO, '-')              AS INVOICE_NO
+				     , (
+				           SELECT COUNT(*)
+				             FROM ORDER_CLAIM X
+				            WHERE X.ORDER_ID = A.ORDER_ID
+				              AND X.USE_YN = 'Y'
+				       )                                   AS CLAIM_COUNT
+				FROM
+				       ORDER_MASTER A
+				     , CUSTOMER B
+				     , PRODUCT C
+				     , SHIPMENT D
+				WHERE 1 = 1
+				  AND A.CUSTOMER_ID = B.CUSTOMER_ID
+				  AND A.PRODUCT_ID  = C.PRODUCT_ID
+				  AND A.ORDER_ID    = D.ORDER_ID(+)
+				  AND A.ORDER_DATE >= TO_DATE('2026-01-01', 'YYYY-MM-DD')
+				ORDER BY A.ORDER_DATE DESC
+				""");
+
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.SQL_QUERY)
+				.extracting(Detection::originalValue)
+				.contains("ORDER_MASTER", "CUSTOMER", "PRODUCT", "SHIPMENT", "ORDER_CLAIM");
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.SQL_QUERY)
+				.extracting(Detection::originalValue)
+				.contains("ORDER_CLAIM", "ORDER_MASTER", "CUSTOMER", "PRODUCT", "SHIPMENT");
+			assertThat(result.detections())
+				.filteredOn(detection -> Set.of("ORDER_CLAIM", "ORDER_MASTER", "CUSTOMER", "PRODUCT", "SHIPMENT")
+					.contains(detection.originalValue()))
+				.extracting(Detection::ruleName)
+				.containsOnly("SQL 테이블명(FROM)");
+			assertThat(result.maskedText())
+				.doesNotContain("ORDER_MASTER", "CUSTOMER B", "PRODUCT C", "SHIPMENT D", "ORDER_CLAIM");
+
+			String orderIdToken = result.detections().stream()
+				.filter(detection -> detection.originalValue().equals("A.ORDER_ID"))
+				.findFirst()
+				.orElseThrow()
+				.token();
+			assertThat(result.detections().stream()
+				.filter(detection -> detection.originalValue().equals("A.ORDER_ID")))
+				.allSatisfy(detection -> assertThat(detection.token()).isEqualTo(orderIdToken));
+		}
+
+		@Test
+		@DisplayName("DB 객체 DML/DDL/프로시저/시퀀스/DB링크 식별자를 탐지한다")
+		void databaseObjectIdentifiersDetected() {
+			MaskingResult result = mask("""
+				INSERT INTO ORDER_AUDIT (ORDER_ID, CREATED_AT, AUDIT_SEQ)
+				VALUES (ORDER_SEQ.NEXTVAL, SYSDATE, AUDIT_SEQ.CURRVAL);
+				UPDATE ORDER_MASTER SET ORDER_STATUS = '05', UPDATED_AT = SYSDATE WHERE ORDER_ID = 1;
+				DELETE FROM ORDER_TEMP WHERE CREATED_AT < SYSDATE - 7;
+				MERGE INTO CUSTOMER_TARGET T USING CUSTOMER_SOURCE S ON (T.CUSTOMER_ID = S.CUSTOMER_ID) WHEN MATCHED THEN UPDATE SET T.NAME = S.NAME;
+				TRUNCATE TABLE OLD_ORDER_LOG;
+				CREATE TABLE ORDER_BACKUP AS SELECT * FROM ORDER_MASTER@ERP_LINK;
+				ALTER INDEX IDX_ORDER_MASTER_01 REBUILD;
+				DROP SEQUENCE OLD_ORDER_SEQ;
+				CALL PKG_ORDER.RECALC_ORDER(:P_ORDER_ID);
+				EXEC PRC_CLOSE_ORDER;
+				""");
+
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.SQL_QUERY)
+				.extracting(Detection::originalValue)
+				.contains(
+					"ORDER_AUDIT", "ORDER_ID", "CREATED_AT", "AUDIT_SEQ",
+					"ORDER_SEQ", "ORDER_MASTER", "ORDER_STATUS", "UPDATED_AT",
+					"ORDER_TEMP", "CUSTOMER_TARGET", "CUSTOMER_SOURCE", "OLD_ORDER_LOG",
+					"ORDER_BACKUP", "ORDER_MASTER@ERP_LINK", "IDX_ORDER_MASTER_01",
+					"OLD_ORDER_SEQ", "PKG_ORDER.RECALC_ORDER", "PRC_CLOSE_ORDER"
+				);
+			assertThat(result.maskedText())
+				.doesNotContain("ORDER_AUDIT", "ORDER_MASTER", "CUSTOMER_TARGET", "ORDER_MASTER@ERP_LINK",
+					"PKG_ORDER.RECALC_ORDER", "PRC_CLOSE_ORDER");
+		}
+
+		@Test
+		@DisplayName("API Key, JWT, JDBC URL 같은 보안 시크릿은 문맥과 무관하게 마스킹한다")
+		void securitySecretsAlwaysDetected() {
+			MaskingResult result = mask("""
+				api_key = sk-test-1234567890abcdef
+				token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.VeryLongSignature123
+				jdbc:mysql://db-prod.internal:3306/customer?user=app&password=secret123
+				""");
+
+			assertThat(result.summary()).containsEntry(MaskingType.SECURITY_SECRET, 3L);
+			assertThat(result.maskedText())
+				.doesNotContain("sk-test-1234567890abcdef")
+				.doesNotContain("eyJhbGciOiJIUzI1NiJ9")
+				.doesNotContain("jdbc:mysql://");
+		}
+
+		@Test
+		@DisplayName("내부 문서번호와 법무 식별 정보는 업무 민감정보로 탐지한다")
+		void internalDocumentAndLegalDetected() {
+			MaskingResult result = mask("""
+				품의번호 HT-2026-001
+				사건번호 2024가단12345
+				법무법인 태평양 검토
+				""");
+
+			assertThat(result.summary())
+				.containsEntry(MaskingType.INTERNAL_DOC_ID, 1L)
+				.containsEntry(MaskingType.LEGAL_DOCUMENT, 2L);
+			assertThat(result.maskedText())
+				.doesNotContain("HT-2026-001")
+				.doesNotContain("2024가단12345")
+				.doesNotContain("법무법인 태평양");
 		}
 	}
 
