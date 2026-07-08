@@ -631,18 +631,8 @@ body {
 }
 
 .attachment-list li {
-	display: inline-flex;
-	align-items: center;
-	gap: 10px;
 	width: min(270px, 100%);
-	min-height: 56px;
-	padding: 8px 10px;
-	border: 1px solid #e3e6eb;
-	border-radius: 8px;
-	background: #ffffff;
-	font-size: 12px;
-	color: var(--text-dark);
-	box-shadow: none;
+	list-style: none;
 }
 
 .file-type-badge {
@@ -718,24 +708,48 @@ body {
 	background: linear-gradient(145deg, #7b8492, #4d5561);
 }
 
-.attachment-list .file-meta {
+.file-card-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.file-card {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	min-height: 58px;
+	padding: 8px 10px;
+	border: 1px solid #e3e6eb;
+	border-radius: 8px;
+	background: #ffffff;
+	font: inherit;
+	font-size: 12px;
+	color: var(--text-dark);
+	box-shadow: none;
+}
+
+.file-card .file-meta {
 	display: grid;
 	min-width: 0;
 	flex: 1;
 	gap: 2px;
 }
 
-.attachment-list .file-name {
+.file-card .file-name {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	font-weight: 700;
+	color: #23304a;
 }
 
-.attachment-list .file-size {
+.file-card .file-size {
 	color: var(--text-gray);
+	font-size: 11px;
 }
 
-.attachment-list button {
+.file-remove-button {
 	width: 24px;
 	height: 24px;
 	flex: 0 0 24px;
@@ -748,9 +762,59 @@ body {
 	line-height: 1;
 }
 
-.attachment-list button:hover {
+.file-remove-button:hover {
 	background: #f0f0f2;
 	color: var(--text-dark);
+}
+
+.message-row.user .sent-files {
+	justify-content: flex-end;
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.message-row.user .sent-files .file-card {
+	max-width: min(300px, 100%);
+	min-height: 42px;
+	gap: 8px;
+	padding: 6px 8px;
+	border-color: rgba(0, 0, 0, 0.08);
+	background: rgba(255, 255, 255, 0.78);
+	font-size: 11px;
+}
+
+.message-row.user .sent-files .file-type-badge {
+	width: 32px;
+	height: 38px;
+	flex-basis: 32px;
+	border-radius: 7px;
+	box-shadow: inset 0 -11px 0 rgba(0, 0, 0, 0.14);
+}
+
+.message-row.user .sent-files .file-type-badge::after {
+	width: 10px;
+	height: 10px;
+	border-bottom-left-radius: 4px;
+}
+
+.message-row.user .sent-files .file-type-mark {
+	width: 19px;
+	height: 15px;
+	margin-top: 2px;
+	border-radius: 4px;
+	font-size: 8px;
+}
+
+.message-row.user .sent-files .file-type-label {
+	font-size: 7px;
+}
+
+.message-row.user .sent-files .file-name {
+	max-width: 210px;
+}
+
+.message-row.user .sent-files .file-size {
+	font-size: 10px;
 }
 
 .attachment-notice {
@@ -915,23 +979,12 @@ body {
 
 /* AI 생성 파일 다운로드 카드 (메시지 말풍선 아래에 표시) */
 .generated-files {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
 	margin-top: 8px;
 }
 
 .file-download-card {
-	display: flex;
-	align-items: center;
-	gap: 10px;
 	max-width: 360px;
-	padding: 10px 14px;
-	border: 1px solid #d7dce3;
-	border-radius: 10px;
-	background: #ffffff;
 	cursor: pointer;
-	font: inherit;
 	text-align: left;
 	transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -944,19 +997,6 @@ body {
 .file-download-card:disabled {
 	opacity: 0.55;
 	cursor: default;
-}
-
-.file-download-card .file-icon {
-	font-size: 20px;
-}
-
-.file-download-card .file-name {
-	flex: 1;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-weight: 600;
-	color: #23304a;
 }
 
 .file-download-card .file-action {
@@ -1076,6 +1116,10 @@ body {
 	background: transparent;
 	color: var(--text-gray);
 	cursor: pointer;
+}
+
+.message-action-button[hidden] {
+	display: none !important;
 }
 
 .message-action-button:hover {

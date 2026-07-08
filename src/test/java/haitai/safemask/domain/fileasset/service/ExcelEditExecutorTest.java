@@ -10,13 +10,20 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
+import org.apache.poi.ss.SpreadsheetVersion;
+import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.Font;
 import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.util.AreaReference;
+import org.apache.poi.ss.util.CellReference;
 import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFTable;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -180,12 +187,148 @@ class ExcelEditExecutorTest {
 	}
 
 	@Test
+	@DisplayName("add_row를 여러 번 써도 기존 줄무늬 행 색상 패턴을 이어간다")
+	void addMultipleRowsPreservesAlternatingRowStyles() throws IOException {
+		byte[] edited = executor.apply(buildZebraWorkbook(), instruction(
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("CS-005", "신규A", "중요")),
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("CS-006", "신규B", "일반")),
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("CS-007", "신규C", "중요"))));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			assertThat(sheet.getRow(5).getCell(0).getCellStyle().getFillForegroundColor())
+				.isEqualTo(IndexedColors.LIGHT_CORNFLOWER_BLUE.getIndex());
+			assertThat(sheet.getRow(6).getCell(0).getCellStyle().getFillPattern())
+				.isNotEqualTo(FillPatternType.SOLID_FOREGROUND);
+			assertThat(sheet.getRow(7).getCell(0).getCellStyle().getFillForegroundColor())
+				.isEqualTo(IndexedColors.LIGHT_CORNFLOWER_BLUE.getIndex());
+		}
+	}
+
+	@Test
+	@DisplayName("add_row는 엑셀 테이블 범위를 확장해 테이블 디자인 규칙을 새 행에도 적용되게 한다")
+	void addRowExtendsExcelTableRange() throws IOException {
+		byte[] edited = executor.apply(buildWorkbookWithTable(), instruction(
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("CS-005", "신규A", "중요")),
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("CS-006", "신규B", "일반"))));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			XSSFSheet sheet = workbook.getSheet("고객상담_접수대장");
+			XSSFTable table = sheet.getTables().get(0);
+			assertThat(table.getStartCellReference().formatAsString()).isEqualTo("A1");
+			assertThat(table.getEndCellReference().formatAsString()).isEqualTo("C7");
+			assertThat(sheet.getRow(5).getCell(0).getStringCellValue()).isEqualTo("CS-005");
+			assertThat(sheet.getRow(6).getCell(0).getStringCellValue()).isEqualTo("CS-006");
+		}
+	}
+
+	@Test
 	@DisplayName("add_row에 values가 없으면 이유를 밝히며 거절한다")
 	void addRowRequiresValues() throws IOException {
 		assertThatThrownBy(() -> executor.apply(buildWorkbook(false, false), instruction(
 			new Op("add_row", null, null, null, null, null, null, null, null))))
 			.isInstanceOf(UnsupportedEditException.class)
 			.hasMessageContaining("values");
+	}
+
+	@Test
+	@DisplayName("add_row는 합계 행 위에 본문 스타일로 새 행을 추가한다")
+	void addRowBeforeSummary() throws IOException {
+		byte[] edited = executor.apply(buildSalesWorkbook(), instruction(
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("신제품", "3000", "중요"))));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			Row added = sheet.getRow(3);
+			assertThat(added.getCell(0).getStringCellValue()).isEqualTo("신제품");
+			assertThat(added.getCell(1).getNumericCellValue()).isEqualTo(3000);
+			assertThat(added.getCell(1).getCellStyle().getDataFormatString()).isEqualTo("#,##0");
+			assertThat(added.getCell(2).getCellStyle().getBorderBottom()).isEqualTo(BorderStyle.THIN);
+			assertThat(sheet.getRow(4).getCell(0).getStringCellValue()).isEqualTo("합계");
+		}
+	}
+
+	@Test
+	@DisplayName("format_header는 헤더에 배경색·글자색·굵게·테두리를 적용한다")
+	void formatHeader() throws IOException {
+		byte[] edited = executor.apply(buildSalesWorkbook(), instruction(
+			new Op("format_header", null, null, null, null, null, null, null, null,
+				"D9EAF7", "C00000", true, true, null, null, null)));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Cell header = workbook.getSheetAt(0).getRow(0).getCell(0);
+			Font font = workbook.getFontAt(header.getCellStyle().getFontIndexAsInt());
+			assertThat(font.getBold()).isTrue();
+			assertThat(header.getCellStyle().getFillPattern()).isEqualTo(FillPatternType.SOLID_FOREGROUND);
+			assertThat(header.getCellStyle().getBorderBottom()).isEqualTo(BorderStyle.THIN);
+		}
+	}
+
+	@Test
+	@DisplayName("format_column은 금액 컬럼에 숫자 서식과 열 너비를 적용한다")
+	void formatColumn() throws IOException {
+		byte[] edited = executor.apply(buildSalesWorkbook(), instruction(
+			new Op("format_column", "금액", null, null, null, null, null, null, null,
+				null, null, null, null, "#,##0", 18.0, null)));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			assertThat(sheet.getColumnWidth(1)).isEqualTo(18 * 256);
+			assertThat(sheet.getRow(1).getCell(1).getCellStyle().getDataFormatString()).isEqualTo("#,##0");
+		}
+	}
+
+	@Test
+	@DisplayName("highlight_rows는 조건에 맞는 행 전체에 강조 서식을 적용한다")
+	void highlightRows() throws IOException {
+		byte[] edited = executor.apply(buildSalesWorkbook(), instruction(
+			new Op("highlight_rows", "상태", null, null, null, null, "중요", null, null,
+				"FFF2CC", "C00000", true, true, null, null, null)));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet sheet = workbook.getSheetAt(0);
+			Cell highlighted = sheet.getRow(2).getCell(0);
+			Cell untouched = sheet.getRow(1).getCell(0);
+			assertThat(highlighted.getCellStyle().getFillPattern()).isEqualTo(FillPatternType.SOLID_FOREGROUND);
+			assertThat(highlighted.getCellStyle().getBorderBottom()).isEqualTo(BorderStyle.THIN);
+			assertThat(untouched.getCellStyle().getFillPattern()).isNotEqualTo(FillPatternType.SOLID_FOREGROUND);
+		}
+	}
+
+	@Test
+	@DisplayName("다중 시트 파일은 sheet 지시로 대상 시트를 고르고 제목/설명 아래의 표에 행을 추가한다")
+	void addRowToRequestedSheetWithDetectedHeader() throws IOException {
+		byte[] edited = executor.apply(buildMultiSheetWorkbook(), instruction(
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("CS-003", "2026-07-06 10:00", "이서연", "중요"),
+				null, null, null, null, null, null, null, "고객상담접수대장")));
+
+		try (XSSFWorkbook workbook = open(edited)) {
+			Sheet guide = workbook.getSheet("안내");
+			Sheet target = workbook.getSheet("고객상담_접수대장");
+			assertThat(guide.getRow(2)).isNull();
+
+			Row added = target.getRow(6);
+			assertThat(added.getCell(0).getStringCellValue()).isEqualTo("CS-003");
+			assertThat(added.getCell(2).getStringCellValue()).isEqualTo("이서연");
+			assertThat(added.getCell(3).getCellStyle().getBorderBottom()).isEqualTo(BorderStyle.THIN);
+		}
+	}
+
+	@Test
+	@DisplayName("다중 시트 파일에서 sheet를 추론할 수 없으면 첫 시트를 수정하지 않고 거절한다")
+	void rejectAmbiguousMultiSheetEdit() throws IOException {
+		assertThatThrownBy(() -> executor.apply(buildMultiSheetWorkbook(), instruction(
+			new Op("add_row", null, null, null, null, null, null, null,
+				List.of("CS-003", "2026-07-06 10:00", "이서연", "중요")))))
+			.isInstanceOf(UnsupportedEditException.class)
+			.hasMessageContaining("sheet");
 	}
 
 	@Test
@@ -254,6 +397,140 @@ class ExcelEditExecutorTest {
 
 			workbook.write(out);
 			return out.toByteArray();
+		}
+	}
+
+	private byte[] buildSalesWorkbook() throws IOException {
+		try (XSSFWorkbook workbook = new XSSFWorkbook();
+			ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+			Sheet sheet = workbook.createSheet("매출");
+			CellStyle body = workbook.createCellStyle();
+			body.setBorderTop(BorderStyle.THIN);
+			body.setBorderRight(BorderStyle.THIN);
+			body.setBorderBottom(BorderStyle.THIN);
+			body.setBorderLeft(BorderStyle.THIN);
+
+			CellStyle money = workbook.createCellStyle();
+			money.cloneStyleFrom(body);
+			money.setDataFormat(workbook.getCreationHelper().createDataFormat().getFormat("#,##0"));
+
+			CellStyle summary = workbook.createCellStyle();
+			summary.cloneStyleFrom(body);
+			summary.setFillForegroundColor(IndexedColors.LIGHT_GREEN.getIndex());
+			summary.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+
+			writeRow(sheet, 0, null, "상품", "금액", "상태");
+			writeSalesRow(sheet, 1, body, money, "기존A", 1000, "일반");
+			writeSalesRow(sheet, 2, body, money, "기존B", 2000, "중요");
+			writeRow(sheet, 3, summary, "합계", "3000", "");
+
+			workbook.write(out);
+			return out.toByteArray();
+		}
+	}
+
+	private byte[] buildZebraWorkbook() throws IOException {
+		try (XSSFWorkbook workbook = new XSSFWorkbook();
+			ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+			Sheet sheet = workbook.createSheet("고객상담_접수대장");
+			writeRow(sheet, 0, null, "접수번호", "고객명", "상태");
+
+			CellStyle blue = workbook.createCellStyle();
+			blue.setFillForegroundColor(IndexedColors.LIGHT_CORNFLOWER_BLUE.getIndex());
+			blue.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+			blue.setBorderBottom(BorderStyle.THIN);
+
+			CellStyle white = workbook.createCellStyle();
+			white.setBorderBottom(BorderStyle.THIN);
+
+			writeStyledRow(sheet, 1, blue, "CS-001", "김민수", "일반");
+			writeStyledRow(sheet, 2, white, "CS-002", "이하늘", "중요");
+			writeStyledRow(sheet, 3, blue, "CS-003", "박지현", "일반");
+			writeStyledRow(sheet, 4, white, "CS-004", "최준용", "중요");
+
+			workbook.write(out);
+			return out.toByteArray();
+		}
+	}
+
+	private byte[] buildWorkbookWithTable() throws IOException {
+		try (XSSFWorkbook workbook = new XSSFWorkbook();
+			ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+			XSSFSheet sheet = workbook.createSheet("고객상담_접수대장");
+			writeRow(sheet, 0, null, "접수번호", "고객명", "상태");
+			writeRow(sheet, 1, null, "CS-001", "김민수", "일반");
+			writeRow(sheet, 2, null, "CS-002", "이하늘", "중요");
+			writeRow(sheet, 3, null, "CS-003", "박지현", "일반");
+			writeRow(sheet, 4, null, "CS-004", "최준용", "중요");
+
+			AreaReference area = new AreaReference(new CellReference(0, 0), new CellReference(4, 2),
+				SpreadsheetVersion.EXCEL2007);
+			XSSFTable table = sheet.createTable(area);
+			table.setName("CustomerLedgerTable");
+			table.setDisplayName("CustomerLedgerTable");
+			table.getCTTable().addNewTableStyleInfo().setName("TableStyleMedium2");
+			table.getCTTable().getTableStyleInfo().setShowRowStripes(true);
+
+			workbook.write(out);
+			return out.toByteArray();
+		}
+	}
+
+	private byte[] buildMultiSheetWorkbook() throws IOException {
+		try (XSSFWorkbook workbook = new XSSFWorkbook();
+			ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+			Sheet guide = workbook.createSheet("안내");
+			writeRow(guide, 0, null, "개인정보 이름 마스킹 테스트 데이터");
+			writeRow(guide, 1, null, "업무 안내");
+
+			Sheet target = workbook.createSheet("고객상담_접수대장");
+			writeRow(target, 0, null, "고객상담 접수대장");
+			writeRow(target, 1, null, "콜센터 접수 화면을 가정한 정형 데이터입니다.");
+			writeRow(target, 3, null, "접수번호", "접수일시", "고객명", "상태");
+
+			CellStyle body = workbook.createCellStyle();
+			body.setBorderTop(BorderStyle.THIN);
+			body.setBorderRight(BorderStyle.THIN);
+			body.setBorderBottom(BorderStyle.THIN);
+			body.setBorderLeft(BorderStyle.THIN);
+			writeRow(target, 4, body, "CS-001", "2026-07-06 09:00", "김민수", "일반");
+			writeRow(target, 5, body, "CS-002", "2026-07-06 09:30", "박지현", "중요");
+
+			// 실제 파일처럼 아래쪽에 값 없는 서식 행이 있어도 데이터 끝으로 오해하면 안 된다.
+			Row blankStyled = target.createRow(10);
+			for (int c = 0; c < 4; c++) {
+				blankStyled.createCell(c).setCellStyle(body);
+			}
+
+			workbook.write(out);
+			return out.toByteArray();
+		}
+	}
+
+	private void writeSalesRow(Sheet sheet, int rowIndex, CellStyle body, CellStyle money, String name, double amount,
+		String status) {
+		Row row = sheet.createRow(rowIndex);
+		Cell nameCell = row.createCell(0);
+		nameCell.setCellValue(name);
+		nameCell.setCellStyle(body);
+		Cell amountCell = row.createCell(1);
+		amountCell.setCellValue(amount);
+		amountCell.setCellStyle(money);
+		Cell statusCell = row.createCell(2);
+		statusCell.setCellValue(status);
+		statusCell.setCellStyle(body);
+	}
+
+	private void writeStyledRow(Sheet sheet, int rowIndex, CellStyle style, String... values) {
+		Row row = sheet.createRow(rowIndex);
+		for (int c = 0; c < values.length; c++) {
+			Cell cell = row.createCell(c);
+			cell.setCellValue(values[c]);
+			cell.setCellStyle(style);
 		}
 	}
 

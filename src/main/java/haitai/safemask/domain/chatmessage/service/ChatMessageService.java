@@ -170,7 +170,9 @@ public class ChatMessageService {
 			.findFirst()
 			.orElseThrow(() -> new CustomException(ErrorCode.INVALID_REQUEST, "다시 생성할 AI 답변이 없습니다."));
 
-		chatMessageRepository.delete(messages.get(0));
+		ChatMessage lastAssistantMessage = messages.get(0);
+		generatedFileService.retireGeneratedFilesFromAnswer(chatRoom, lastAssistantMessage.getOriginalContent());
+		chatMessageRepository.delete(lastAssistantMessage);
 		chatRoom.touch();
 		AiRun aiRun = aiRunRepository.save(AiRun.createApproved(chatRoom, lastUserMessage));
 
