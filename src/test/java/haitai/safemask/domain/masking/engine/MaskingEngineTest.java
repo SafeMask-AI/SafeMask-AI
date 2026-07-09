@@ -668,7 +668,7 @@ class MaskingEngineTest {
 				""");
 
 			assertThat(result.summary())
-				.containsEntry(MaskingType.SQL_QUERY, 7L)
+				.containsEntry(MaskingType.SQL_QUERY, 9L)
 				.containsEntry(MaskingType.PHONE, 1L);
 			assertThat(result.maskedText())
 				.contains("SELECT")
@@ -677,8 +677,337 @@ class MaskingEngineTest {
 				.contains("WHERE")
 				.doesNotContain("customer_master")
 				.doesNotContain("order_history")
+				.doesNotContain("customer_master c")
+				.doesNotContain("order_history o")
 				.doesNotContain("customer_name")
 				.doesNotContain("010-1234-5678");
+		}
+
+		@Test
+		@DisplayName("SQL 식별자는 무의미한 순번 토큰이 아니라 의미 보존형 토큰으로 마스킹한다")
+		void sqlIdentifiersUseSemanticTokens() {
+			MaskingResult result = mask("""
+				SELECT
+				       A.ORDER_ID
+				     , B.CUSTOMER_NAME
+				     , B.PHONE_NO
+				     , B.EMAIL
+				FROM ORDER_MASTER A
+				JOIN CUSTOMER B ON A.CUSTOMER_ID = B.CUSTOMER_ID
+				""");
+
+			assertThat(result.maskedText())
+				.contains("O_MAIN.ORDER_ID")
+				.contains("CUST_MAIN.CUSTOMER_NAME")
+				.contains("CUST_MAIN.CUSTOMER_PHONE")
+				.contains("CUST_MAIN.CUSTOMER_EMAIL")
+				.contains("FROM T01_ORDER_MAIN O_MAIN")
+				.contains("JOIN T02_CUSTOMER CUST_MAIN")
+				.doesNotContain("[SQL_")
+				.doesNotContain("ORDER_MASTER")
+				.doesNotContain("CUSTOMER B")
+				.doesNotContain("PHONE_NO");
+		}
+
+		@Test
+		@DisplayName("SQL 출력 컬럼 별칭도 의미 보존형으로 마스킹한다")
+		void sqlOutputAliasesUseSemanticTokens() {
+			MaskingResult result = mask("""
+				SELECT
+				       A.ORDER_ID          AS ORDER_ID
+				     , B.CUSTOMER_NAME     AS CUSTOMER_NAME
+				     , B.PHONE_NO          AS PHONE_NO
+				     , B.EMAIL             AS EMAIL
+				     , G.MANAGER_NAME      AS SALES_MANAGER_NAME
+				FROM ORDER_MASTER A
+				JOIN CUSTOMER B ON A.CUSTOMER_ID = B.CUSTOMER_ID
+				JOIN EMPLOYEE G ON G.EMPLOYEE_ID = B.MANAGER_ID
+				""");
+
+			assertThat(result.maskedText())
+				.contains("O_MAIN.ORDER_ID          AS ORDER_ID")
+				.contains("CUST_MAIN.CUSTOMER_NAME     AS CUSTOMER_DISPLAY_NAME")
+				.contains("CUST_MAIN.CUSTOMER_PHONE          AS CUSTOMER_PHONE")
+				.contains("CUST_MAIN.CUSTOMER_EMAIL             AS CUSTOMER_EMAIL")
+				.contains("EMP_MAIN.MANAGER_NAME      AS MANAGER_NAME")
+				.contains("JOIN T03_EMPLOYEE EMP_MAIN")
+				.doesNotContain("AS CUSTOMER_NAME")
+				.doesNotContain("AS PHONE_NO")
+				.doesNotContain("AS EMAIL")
+				.doesNotContain("AS SALES_MANAGER_NAME")
+				.doesNotContain(" G ON");
+		}
+
+		@Test
+		@DisplayName("SQL MEMBER/USER/ACCOUNT 도메인은 CUSTOMER와 분리해 의미 보존형 토큰을 만든다")
+		void sqlMemberUserAccountDomainSeparatedFromCustomer() {
+			MaskingResult result = mask("""
+				SELECT
+				       M.MEMBER_ID
+				     , M.PHONE_NO
+				     , U.LOGIN_ID
+				     , AC.ACCOUNT_STATUS
+				     , C.CUSTOMER_ID
+				FROM MEMBER_PROFILE M
+				JOIN USER_LOGIN U ON U.MEMBER_ID = M.MEMBER_ID
+				JOIN ACCOUNT_MASTER AC ON AC.MEMBER_ID = M.MEMBER_ID
+				JOIN CUSTOMER C ON C.MEMBER_ID = M.MEMBER_ID
+				""");
+
+			assertThat(result.maskedText())
+				.contains("FROM T01_USER_PROFILE U_PROFILE")
+				.contains("JOIN T02_USER_LOGIN U_LOGIN")
+				.contains("JOIN T03_USER_MAIN U_MAIN")
+				.contains("JOIN T04_CUSTOMER CUST_MAIN")
+				.contains("U_PROFILE.MEMBER_ID")
+				.contains("U_PROFILE.USER_PHONE")
+				.contains("U_LOGIN.LOGIN_ID")
+				.contains("U_MAIN.ACCOUNT_STATUS")
+				.contains("CUST_MAIN.CUSTOMER_ID")
+				.doesNotContain("T01_CUSTOMER")
+				.doesNotContain("CUST_PROFILE")
+					.doesNotContain("CUSTOMER_PHONE");
+		}
+
+		@Test
+		@DisplayName("SQL CTE 선언명과 FROM 참조명을 같은 의미형 토큰으로 마스킹한다")
+		void sqlCteNamesUseSameSemanticTokenAsFromReference() {
+			MaskingResult result = mask("""
+				WITH MEMBER_BASE AS (
+				    SELECT M.MEMBER_ID, M.MEMBER_NAME
+				      FROM APP_SCHEMA.APP_MEMBER M
+				     WHERE M.USE_YN = 'Y'
+				),
+				PAYMENT_SUMMARY AS (
+				    SELECT P.MEMBER_ID, SUM(P.PAYMENT_AMOUNT) AS TOTAL_PAYMENT_AMOUNT
+				      FROM BILLING_SCHEMA.PAYMENT_HISTORY P
+				     GROUP BY P.MEMBER_ID
+				)
+				SELECT MB.MEMBER_ID, PS.TOTAL_PAYMENT_AMOUNT
+				  FROM MEMBER_BASE MB
+				  JOIN PAYMENT_SUMMARY PS ON MB.MEMBER_ID = PS.MEMBER_ID
+				""");
+
+			String memberBaseToken = result.detections().stream()
+				.filter(detection -> detection.originalValue().equals("MEMBER_BASE"))
+				.findFirst()
+				.orElseThrow()
+				.token();
+			String paymentSummaryToken = result.detections().stream()
+				.filter(detection -> detection.originalValue().equals("PAYMENT_SUMMARY"))
+				.findFirst()
+				.orElseThrow()
+				.token();
+
+			assertThat(result.detections().stream()
+				.filter(detection -> detection.originalValue().equals("MEMBER_BASE")))
+				.allSatisfy(detection -> assertThat(detection.token()).isEqualTo(memberBaseToken));
+			assertThat(result.detections().stream()
+				.filter(detection -> detection.originalValue().equals("PAYMENT_SUMMARY")))
+				.allSatisfy(detection -> assertThat(detection.token()).isEqualTo(paymentSummaryToken));
+			assertThat(result.maskedText())
+				.contains("WITH " + memberBaseToken + " AS")
+				.contains("FROM " + memberBaseToken + " U_MAIN")
+				.contains("JOIN " + paymentSummaryToken + " PY_REF")
+				.doesNotContain("WITH MEMBER_BASE")
+				.doesNotContain("FROM MEMBER_BASE MB")
+				.doesNotContain("PAYMENT_SUMMARY PS");
+		}
+
+		@Test
+		@DisplayName("중간에 빈 줄과 주석이 있는 SQL도 하나의 블록으로 계속 탐지한다")
+		void sqlBlockContinuesAcrossBlankLinesWhenNextLineLooksSql() {
+			MaskingResult result = mask("""
+				SELECT MB.MEMBER_ID, PS.TOTAL_PAYMENT_AMOUNT
+				  FROM MEMBER_BASE MB
+				  JOIN PAYMENT_SUMMARY PS ON MB.MEMBER_ID = PS.MEMBER_ID
+				 WHERE 1 = 1
+
+				  /* 최근 로그인 또는 최근 결제 회원만 조회 */
+				   AND (
+				        PS.LAST_PAYMENT_DATE IS NOT NULL
+				     OR MB.LAST_LOGIN_AT IS NOT NULL
+				       )
+
+				 ORDER BY PS.TOTAL_PAYMENT_AMOUNT DESC
+				""");
+
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.SQL_QUERY)
+				.extracting(Detection::originalValue)
+				.contains("PS.LAST_PAYMENT_DATE", "MB.LAST_LOGIN_AT", "PS.TOTAL_PAYMENT_AMOUNT");
+			assertThat(result.maskedText())
+				.doesNotContain("PS.LAST_PAYMENT_DATE")
+				.doesNotContain("MB.LAST_LOGIN_AT")
+				.doesNotContain("PS.TOTAL_PAYMENT_AMOUNT");
+		}
+
+		@Test
+		@DisplayName("FROM table AS alias 구문은 출력 컬럼 별칭이 아니라 테이블 별칭으로 분류한다")
+		void sqlFromTableAsAliasDetectedAsTableAlias() {
+			MaskingResult result = mask("""
+				SELECT C.CUSTOMER_ID
+				  FROM CUSTOMER AS C
+				 WHERE C.USE_YN = 'Y'
+				""");
+
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.originalValue().equals("C"))
+				.extracting(Detection::ruleName)
+				.containsOnly("SQL 테이블 별칭");
+			assertThat(result.maskedText())
+				.contains("FROM T01_CUSTOMER AS CUST_MAIN")
+				.contains("CUST_MAIN.CUSTOMER_ID")
+				.doesNotContain("FROM CUSTOMER AS C");
+		}
+
+		@Test
+		@DisplayName("SQL 의미 보존형 토큰도 GPT 응답에서 원본 식별자로 원복한다")
+		void sqlSemanticTokensRestored() {
+			mask("""
+				SELECT B.PHONE_NO
+				FROM CUSTOMER B
+				""");
+
+			String restored = engine.restore("CUST_MAIN.CUSTOMER_PHONE 컬럼은 T01_CUSTOMER 테이블에서 확인하세요.",
+				assigner::resolve);
+
+			assertThat(restored).contains("B.PHONE_NO", "CUSTOMER");
+			assertThat(restored).doesNotContain("CUST_MAIN.CUSTOMER_PHONE", "T01_CUSTOMER");
+		}
+
+		@Test
+		@DisplayName("SQL 의미 보존형 alias 선언과 컬럼 참조는 원복 후 서로 섞이지 않는다")
+		void sqlSemanticAliasDeclarationRestoredConsistently() {
+			mask("""
+				SELECT M.MEMBER_ID
+				FROM APP_SCHEMA.APP_MEMBER M
+				WHERE M.USE_YN = 'Y'
+				""");
+
+			String restored = engine.restore("""
+				FROM T01_USER U_MAIN
+				WHERE U_MAIN.USE_YN = 'Y'
+				""", assigner::resolve);
+
+			assertThat(restored)
+				.contains("FROM APP_SCHEMA.APP_MEMBER M")
+				.contains("WHERE M.USE_YN = 'Y'")
+				.doesNotContain("APP_SCHEMA.APP_MEMBER U_MAIN")
+				.doesNotContain("WHERE U_MAIN.USE_YN");
+		}
+
+		@Test
+		@DisplayName("같은 도메인의 SQL 별칭은 서로 다른 의미형 별칭으로 치환해 조건 의미를 보존한다")
+		void sqlAliasTokensStayUniqueWithinSameDomain() {
+			MaskingResult result = mask("""
+				SELECT A.ORDER_ID, Y.ORDER_ID, OM.ORDER_NO, D.CATEGORY_NAME, E.DISCOUNT_RATE, BL.CUSTOMER_ID
+				FROM ORDER_MASTER A
+				JOIN ORDER_HISTORY Y ON Y.ORDER_ID = A.ORDER_ID
+				JOIN ORDER_RECENT OM ON OM.ORDER_ID = A.ORDER_ID
+				JOIN PRODUCT_CATEGORY D ON D.CATEGORY_ID = A.CATEGORY_ID
+				JOIN PRODUCT_DISCOUNT E ON E.PRODUCT_ID = A.PRODUCT_ID
+				JOIN CUSTOMER B ON B.CUSTOMER_ID = A.CUSTOMER_ID
+				LEFT JOIN CUSTOMER_BLACKLIST BL ON BL.CUSTOMER_ID = B.CUSTOMER_ID
+				""");
+
+			assertThat(result.maskedText())
+				.contains("O_MAIN.ORDER_ID")
+				.contains("O_HIST.ORDER_ID")
+				.contains("O_RECENT.ORDER_NO")
+				.contains("P_CAT.CATEGORY_NAME")
+				.contains("P_DISC.DISCOUNT_RATE")
+				.contains("CUST_MAIN.CUSTOMER_ID")
+				.contains("CUST_EXCL.CUSTOMER_ID")
+				.contains("T01_ORDER_MAIN")
+				.contains("T02_ORDER_LOG")
+				.contains("T03_ORDER_RECENT")
+				.contains("T04_PRODUCT_CATEGORY")
+				.contains("T05_PRODUCT_DISCOUNT")
+				.contains("T07_CUSTOMER_EXCLUSION")
+				.doesNotContain("O2.ORDER_ID = O2.ORDER_ID")
+				.doesNotContain("P2")
+				.doesNotContain("C2");
+		}
+
+		@Test
+		@DisplayName("SQL 테이블 별칭 선언과 alias.* 참조를 SQL 블록 안에서만 탐지한다")
+		void sqlTableAliasesDetectedInsideSqlBlockOnly() {
+			MaskingResult result = mask("""
+				SELECT cust.*, ord.ORDER_ID
+				FROM CUSTOMER_MASTER cust
+				JOIN ORDER_MASTER ord ON cust.CUSTOMER_ID = ord.CUSTOMER_ID
+				WHERE ord.USE_YN = 'Y';
+
+				첨부 파일
+				- alias.report.xlsx
+
+				이메일
+				cust.owner@example.com
+				""");
+
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.SQL_QUERY)
+				.extracting(Detection::originalValue)
+				.contains("cust", "ord", "cust.*", "ord.ORDER_ID", "CUSTOMER_MASTER", "ORDER_MASTER")
+				.doesNotContain("alias.report.xlsx", "cust.owner", "example.com");
+			assertThat(result.maskedText())
+				.doesNotContain("CUSTOMER_MASTER cust")
+				.doesNotContain("ORDER_MASTER ord")
+				.doesNotContain("cust.*")
+				.doesNotContain("cust.owner@example.com");
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.EMAIL)
+				.extracting(Detection::originalValue)
+				.contains("cust.owner@example.com");
+		}
+
+		@Test
+		@DisplayName("엑셀 일반 값의 점 포함 코드명은 SQL 문맥이 없으면 SQL로 탐지하지 않는다")
+		void dottedExcelValueDoesNotBecomeSqlWithoutSqlContext() {
+			MaskingResult result = mask("""
+				항목\t코드\t비고
+				주문번호\tA.ORDER_ID\t엑셀 일반 데이터
+				고객코드\tB.CUSTOMER_NAME\tSQL 쿼리 아님
+				설명\tFROM CUSTOMER\t셀 안의 설명 문구
+				설명\tJOIN PRODUCT\t셀 안의 설명 문구
+				""");
+
+			assertThat(result.detections())
+				.noneSatisfy(detection -> assertThat(detection.type()).isEqualTo(MaskingType.SQL_QUERY));
+			assertThat(result.maskedText()).contains("A.ORDER_ID", "B.CUSTOMER_NAME", "FROM CUSTOMER",
+				"JOIN PRODUCT");
+		}
+
+		@Test
+		@DisplayName("SQL 쿼리와 엑셀 추출 텍스트가 함께 있어도 SQL 블록 밖 이메일/파일명은 SQL로 탐지하지 않는다")
+		void mixedSqlAndExcelTextScansOnlySqlBlock() {
+			MaskingResult result = mask("""
+				SELECT
+				       A.ORDER_ID AS ORDER_ID
+				     , B.CUSTOMER_NAME AS CUSTOMER_NAME
+				FROM ORDER_MASTER A
+				JOIN CUSTOMER B ON A.CUSTOMER_ID = B.CUSTOMER_ID;
+
+				첨부 파일
+				- pii_masking_test_data_20rows.xlsx
+
+				이름\t이메일
+				김민준\tminjun.kim@example.com
+				이서연\tseoyeon.lee@example.net
+				박지훈\tjihoon.park@example.org
+				""");
+
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.SQL_QUERY)
+				.extracting(Detection::originalValue)
+				.contains("A.ORDER_ID", "B.CUSTOMER_NAME", "ORDER_MASTER", "CUSTOMER")
+				.doesNotContain("pii_masking_test_data_20rows.xlsx", "minjun.kim", "example.com",
+					"seoyeon.lee", "example.net", "jihoon.park", "example.org");
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.EMAIL)
+				.extracting(Detection::originalValue)
+				.contains("minjun.kim@example.com", "seoyeon.lee@example.net", "jihoon.park@example.org");
 		}
 
 		@Test
@@ -844,6 +1173,12 @@ class MaskingEngineTest {
 				tokenToValue.put(token, value);
 				return token;
 			});
+		}
+
+		@Override
+		public void remember(MaskingType type, String value, String token) {
+			valueToToken.putIfAbsent(type.name() + ":" + value, token);
+			tokenToValue.putIfAbsent(token, value);
 		}
 
 		/** 원복 테스트용 역방향 조회 (TokenResolver로 사용) */

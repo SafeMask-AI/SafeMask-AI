@@ -45,7 +45,7 @@ public class MaskingService {
 		validateText(text);
 
 		return maskingEngine.mask(text, resolveActiveRules(),
-			(type, value) -> tokenMappingStore.getOrCreateToken(chatRoomId, type, value),
+			new MaskingTokenAssigner(chatRoomId),
 			DetectionPolicies.standard(text, nameDictionaryService.snapshot()));
 	}
 
@@ -105,6 +105,25 @@ public class MaskingService {
 	private void validateText(String text) {
 		if (text == null || text.isBlank()) {
 			throw new CustomException(ErrorCode.INVALID_REQUEST);
+		}
+	}
+
+	private class MaskingTokenAssigner implements haitai.safemask.domain.masking.engine.TokenAssigner {
+
+		private final Long chatRoomId;
+
+		private MaskingTokenAssigner(Long chatRoomId) {
+			this.chatRoomId = chatRoomId;
+		}
+
+		@Override
+		public String assign(MaskingType type, String value) {
+			return tokenMappingStore.getOrCreateToken(chatRoomId, type, value);
+		}
+
+		@Override
+		public void remember(MaskingType type, String value, String token) {
+			tokenMappingStore.rememberToken(chatRoomId, type, value, token);
 		}
 	}
 }

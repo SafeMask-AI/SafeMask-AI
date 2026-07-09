@@ -13,6 +13,7 @@ public record MaskingDetectionResponse(
 	MaskingType type,
 	String displayName,
 	String detailName,
+	String previewValue,
 	String token,
 	int startIndex,
 	int endIndex
@@ -22,6 +23,7 @@ public record MaskingDetectionResponse(
 			detection.type(),
 			detection.type().getDisplayName(),
 			normalizeDetailName(detection.type(), detection.ruleName()),
+			detection.originalValue(),
 			detection.token(),
 			detection.startIndex(),
 			detection.endIndex()
@@ -29,6 +31,9 @@ public record MaskingDetectionResponse(
 	}
 
 	private static String normalizeDetailName(MaskingType type, String detailName) {
+		if (type == MaskingType.NAME) {
+			return type.getDisplayName();
+		}
 		if (type != MaskingType.SQL_QUERY) {
 			return detailName;
 		}

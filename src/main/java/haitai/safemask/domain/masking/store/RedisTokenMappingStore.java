@@ -65,6 +65,18 @@ public class RedisTokenMappingStore implements TokenMappingStore {
 	}
 
 	@Override
+	public void rememberToken(Long chatRoomId, MaskingType type, String value, String token) {
+		if (value == null || value.isBlank() || token == null || token.isBlank()) {
+			return;
+		}
+		HashOperations<String, String, String> hashOps = redisTemplate.opsForHash();
+		String field = type.name() + ":" + value;
+		hashOps.putIfAbsent(valueToTokenKey(chatRoomId), field, token);
+		hashOps.putIfAbsent(tokenToValueKey(chatRoomId), token, value);
+		refreshTtl(chatRoomId);
+	}
+
+	@Override
 	public String findOriginal(Long chatRoomId, String token) {
 		HashOperations<String, String, String> hashOps = redisTemplate.opsForHash();
 		String value = hashOps.get(tokenToValueKey(chatRoomId), token);

@@ -20,4 +20,12 @@ public interface TokenAssigner {
 	 * @return "[TYPE_001]" 형태의 토큰 (예: [PHONE_001])
 	 */
 	String assign(MaskingType type, String value);
+
+	/**
+	 * 엔진이 직접 만든 토큰을 저장소에 등록합니다.
+	 * SQL 의미 보존형 토큰처럼 "[SQL_001]" 채번 규칙을 쓰지 않는 경우에도
+	 * GPT 응답 원복을 위해 token -> 원본값 매핑은 필요합니다.
+	 */
+	default void remember(MaskingType type, String value, String token) {
+	}
 }

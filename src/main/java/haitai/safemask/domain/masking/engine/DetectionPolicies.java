@@ -1,6 +1,7 @@
 package haitai.safemask.domain.masking.engine;
 
 import haitai.safemask.domain.maskingrule.service.MaskingRuleSeeder;
+import haitai.safemask.domain.maskingentity.enums.MaskingType;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -71,15 +72,21 @@ public final class DetectionPolicies {
 	 */
 	public static MaskingEngine.DetectionFilter standard(String text, Set<String> givenNames) {
 		TableScan scan = scanTables(text);
+		List<SqlIdentifierExtractor.Range> sqlRanges = SqlIdentifierExtractor.ranges(text);
 
-		return (rule, value, start) -> switch (rule.getName()) {
-			case MaskingRuleSeeder.NAME_STANDALONE_RULE_NAME, MaskingRuleSeeder.NAME_IN_SENTENCE_RULE_NAME ->
-				acceptName(rule.getName(), value, scan, givenNames);
-			case MaskingRuleSeeder.CARD_CONTIGUOUS_RULE_NAME -> passesLuhn(value);
-			case MaskingRuleSeeder.PASSPORT_RULE_NAME -> !isProductCodeContext(text, start);
-			case MaskingRuleSeeder.SQL_QUALIFIED_IDENTIFIER_RULE_NAME -> hasSqlContext(text, start)
-				&& isSqlIdentifier(value);
-			default -> true;
+		return (rule, value, start) -> {
+			if (rule.getType() == MaskingType.SQL_QUERY) {
+				return SqlIdentifierExtractor.contains(sqlRanges, start)
+					&& (!MaskingRuleSeeder.SQL_QUALIFIED_IDENTIFIER_RULE_NAME.equals(rule.getName())
+					|| isSqlIdentifier(value));
+			}
+			return switch (rule.getName()) {
+				case MaskingRuleSeeder.NAME_STANDALONE_RULE_NAME, MaskingRuleSeeder.NAME_IN_SENTENCE_RULE_NAME ->
+					acceptName(rule.getName(), value, scan, givenNames);
+				case MaskingRuleSeeder.CARD_CONTIGUOUS_RULE_NAME -> passesLuhn(value);
+				case MaskingRuleSeeder.PASSPORT_RULE_NAME -> !isProductCodeContext(text, start);
+				default -> true;
+			};
 		};
 	}
 
@@ -246,11 +253,4 @@ public final class DetectionPolicies {
 		return true;
 	}
 
-	private static boolean hasSqlContext(String text, int start) {
-		String window = text.substring(Math.max(0, start - 80), Math.min(text.length(), start + 80))
-			.toUpperCase();
-		return window.contains("SELECT ") || window.contains(" FROM ") || window.contains("\nFROM ")
-			|| window.contains(" JOIN ") || window.contains("\nJOIN ") || window.contains(" WHERE ")
-			|| window.contains("\nWHERE ") || window.contains(" UPDATE ") || window.contains("\nUPDATE ");
-	}
 }
