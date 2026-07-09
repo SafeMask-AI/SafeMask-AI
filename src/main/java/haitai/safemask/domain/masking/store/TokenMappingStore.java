@@ -23,6 +23,15 @@ public interface TokenMappingStore {
 	String getOrCreateToken(Long chatRoomId, MaskingType type, String value);
 
 	/**
+	 * 외부에서 생성한 토큰을 같은 방의 원복 매핑에 저장합니다.
+	 *
+	 * <p>SQL 의미 보존형 토큰(T01_ORDER, C.CUSTOMER_PHONE 등)은 엔진이 직접 생성하므로
+	 * 일반 순번 채번을 거치지 않습니다. 그래도 GPT 응답에서 해당 토큰이 돌아오면
+	 * 원본 SQL 식별자로 복원할 수 있어야 하므로 같은 Redis 매핑에 등록합니다.
+	 */
+	void rememberToken(Long chatRoomId, MaskingType type, String value, String token);
+
+	/**
 	 * 토큰의 원본값을 조회합니다. (GPT 응답 원복용)
 	 *
 	 * @return 원본값. 매핑이 없으면(TTL 만료 등) null

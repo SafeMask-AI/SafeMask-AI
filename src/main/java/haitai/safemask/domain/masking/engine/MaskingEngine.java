@@ -6,6 +6,7 @@ import haitai.safemask.domain.maskingentity.enums.MaskingType;
 import haitai.safemask.domain.maskingrule.entity.MaskingRule;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +43,15 @@ public class MaskingEngine {
 	 * 텍스트 속 마스킹 토큰을 찾는 패턴 (예: [PERSON_001], [PHONE_002]).
 	 * 원복 시 GPT 응답에서 이 패턴에 걸리는 부분만 Redis 매핑으로 되돌립니다.
 	 */
-	private static final Pattern TOKEN_PATTERN = Pattern.compile("\\[[A-Z_]+_\\d{3}]");
+	private static final Pattern TOKEN_PATTERN = Pattern.compile(
+		"\\[[A-Z_]+_\\d{3}]"
+			+ "|\\b[A-Z][A-Z0-9_]*\\.[A-Z][A-Z0-9_]*\\b"
+			+ "|\\b[A-Z][A-Z0-9_]*\\.\\*"
+			+ "|\\bT\\d{2}_[A-Z][A-Z0-9_]*\\b"
+			+ "|\\b(?:SEQ|OBJ|PKG|PRC|IDX)_[A-Z][A-Z0-9_]*\\b"
+			+ "|\\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\\b");
+	private static final Pattern SQL_QUALIFIED_SEMANTIC_TOKEN = Pattern.compile(
+		"\\b([A-Z][A-Z0-9_]*)\\.([A-Z][A-Z0-9_]*)\\b");
 
 	/**
 	 * 규칙 정규식의 컴파일 결과 캐시. (패턴 문자열 → 컴파일 결과)
@@ -87,6 +96,9 @@ public class MaskingEngine {
 		List<Detection> detections = new ArrayList<>();
 
 		for (MaskingRule rule : rules) {
+			if (rule.getType() == MaskingType.SQL_QUERY) {
+				continue;
+			}
 			Pattern pattern = compileOrSkip(rule);
 			if (pattern == null) {
 				continue;
@@ -121,13 +133,26 @@ public class MaskingEngine {
 	}
 
 	private void addSqlIdentifierDetections(String text, List<Detection> detections, TokenAssigner tokenAssigner) {
-		for (SqlIdentifierExtractor.Item item : SqlIdentifierExtractor.extract(text)) {
+		List<SqlIdentifierExtractor.Item> sqlItems = SqlIdentifierExtractor.extract(text);
+		SqlSemanticTokenGenerator sqlTokens = SqlSemanticTokenGenerator.from(sqlItems);
+		Set<String> rememberedSqlMappings = new HashSet<>();
+		sqlTokens.aliasTokenToOriginal()
+			.forEach((token, original) -> rememberSqlToken(tokenAssigner, rememberedSqlMappings, original, token));
+		for (SqlIdentifierExtractor.Item item : sqlItems) {
 			if (overlapsAccepted(detections, item.start(), item.end())) {
 				continue;
 			}
-			String token = tokenAssigner.assign(MaskingType.SQL_QUERY, item.value());
+			String token = sqlTokens.tokenFor(item);
+			rememberSqlToken(tokenAssigner, rememberedSqlMappings, item.value(), token);
 			detections.add(new Detection(MaskingType.SQL_QUERY, item.value(), token,
 				item.start(), item.end(), normalizeRuleName(MaskingType.SQL_QUERY, item.ruleName())));
+		}
+	}
+
+	private void rememberSqlToken(TokenAssigner tokenAssigner, Set<String> rememberedSqlMappings, String value,
+		String token) {
+		if (rememberedSqlMappings.add(token + "\u0000" + value)) {
+			tokenAssigner.remember(MaskingType.SQL_QUERY, value, token);
 		}
 	}
 
@@ -210,17 +235,48 @@ public class MaskingEngine {
 	 * 사용자가 상황을 인지하기에 안전하기 때문입니다.
 	 */
 	public String restore(String text, TokenResolver tokenResolver) {
+		Map<String, String> resolvedTokens = new HashMap<>();
+		Map<String, String> inferredAliasTokens = inferSqlAliasTokens(text, tokenResolver, resolvedTokens);
 		Matcher matcher = TOKEN_PATTERN.matcher(text);
 		StringBuilder restored = new StringBuilder();
 
 		while (matcher.find()) {
-			String original = tokenResolver.resolve(matcher.group());
-			String replacement = original != null ? original : matcher.group();
+			String original = resolveToken(matcher.group(), tokenResolver, resolvedTokens);
+			String replacement = original != null ? original
+				: inferredAliasTokens.getOrDefault(matcher.group(), matcher.group());
 			matcher.appendReplacement(restored, Matcher.quoteReplacement(replacement));
 		}
 		matcher.appendTail(restored);
 
 		return restored.toString();
+	}
+
+	private Map<String, String> inferSqlAliasTokens(String text, TokenResolver tokenResolver,
+		Map<String, String> resolvedTokens) {
+		Map<String, String> inferred = new HashMap<>();
+		Matcher matcher = SQL_QUALIFIED_SEMANTIC_TOKEN.matcher(text);
+		while (matcher.find()) {
+			String token = matcher.group();
+			String original = resolveToken(token, tokenResolver, resolvedTokens);
+			if (original == null) {
+				continue;
+			}
+			int dot = original.indexOf('.');
+			if (dot <= 0) {
+				continue;
+			}
+			inferred.putIfAbsent(matcher.group(1), original.substring(0, dot));
+		}
+		return inferred;
+	}
+
+	private String resolveToken(String token, TokenResolver tokenResolver, Map<String, String> resolvedTokens) {
+		if (resolvedTokens.containsKey(token)) {
+			return resolvedTokens.get(token);
+		}
+		String original = tokenResolver.resolve(token);
+		resolvedTokens.put(token, original);
+		return original;
 	}
 
 	/**
