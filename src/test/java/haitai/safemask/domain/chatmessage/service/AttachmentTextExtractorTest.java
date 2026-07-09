@@ -1,7 +1,10 @@
 package haitai.safemask.domain.chatmessage.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import haitai.safemask.domain.fileasset.service.FileUploadPolicy;
+import haitai.safemask.global.exception.CustomException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +18,7 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * AttachmentTextExtractor 단위 테스트입니다.
@@ -25,7 +29,7 @@ import org.springframework.mock.web.MockMultipartFile;
  */
 class AttachmentTextExtractorTest {
 
-	private final AttachmentTextExtractor extractor = new AttachmentTextExtractor();
+	private final AttachmentTextExtractor extractor = new AttachmentTextExtractor(new FileUploadPolicy());
 
 	@Test
 	@DisplayName("xlsx의 문자열·숫자 셀이 추출되고, 셀은 탭·행은 줄바꿈으로 구분된다")
@@ -87,6 +91,38 @@ class AttachmentTextExtractorTest {
 		assertThat(extracted).contains("word-test.docx", "김민수", "010-2345-6789");
 	}
 
+	@Test
+	@DisplayName("허용 개수를 초과한 첨부 파일은 처리하지 않는다")
+	void rejectsTooManyFiles() {
+		List<MultipartFile> files = List.of(
+			textFile("1.txt"), textFile("2.txt"), textFile("3.txt"),
+			textFile("4.txt"), textFile("5.txt"), textFile("6.txt"));
+
+		assertThatThrownBy(() -> extractor.extract(files))
+			.isInstanceOf(CustomException.class)
+			.hasMessageContaining("최대 5개");
+	}
+
+	@Test
+	@DisplayName("지원하지 않는 확장자는 처리하지 않는다")
+	void rejectsUnsupportedExtension() {
+		assertThatThrownBy(() -> extractor.extract(List.of(
+			new MockMultipartFile("files", "malware.exe", "application/octet-stream", "x".getBytes()))))
+			.isInstanceOf(CustomException.class)
+			.hasMessageContaining("지원하지 않는 파일 형식");
+	}
+
+	@Test
+	@DisplayName("추출 텍스트가 너무 긴 파일은 앞부분만 보내지 않고 거절한다")
+	void rejectsOversizedExtractedText() {
+		String text = "가".repeat(30_001);
+
+		assertThatThrownBy(() -> extractor.extract(List.of(
+			new MockMultipartFile("files", "long.txt", "text/plain", text.getBytes(StandardCharsets.UTF_8)))))
+			.isInstanceOf(CustomException.class)
+			.hasMessageContaining("파일 내용이 너무 많아");
+	}
+
 	// ==== 테스트 데이터 ====
 
 	/** POI로 단일 시트 xlsx를 만듭니다 (MS 엑셀이 저장하는 표준 형태) */
@@ -97,6 +133,10 @@ class AttachmentTextExtractorTest {
 			workbook.write(out);
 		}
 		return out.toByteArray();
+	}
+
+	private MockMultipartFile textFile(String name) {
+		return new MockMultipartFile("files", name, "text/plain", "test".getBytes(StandardCharsets.UTF_8));
 	}
 
 	private void writeSheet(Sheet sheet, String[][] rows) {

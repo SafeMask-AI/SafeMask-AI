@@ -27,17 +27,19 @@ public class FileAssetService {
 
 	private final FileAssetRepository fileAssetRepository;
 	private final FileStorageService fileStorageService;
+	private final FileUploadPolicy fileUploadPolicy;
 
 	/**
 	 * 사용자가 첨부한 원본 파일들을 사내 스토리지에 보관합니다.
 	 * 이 원본은 AI 편집 요청 시 "카피의 출발점"으로만 읽히며 절대 수정되지 않습니다.
-	 * 파일 하나가 저장에 실패해도 채팅 흐름은 계속돼야 하므로 로그만 남기고 건너뜁니다.
+	 * 저장 실패를 조용히 넘기면 이후 파일 편집 요청에서 원본을 찾지 못하므로 요청을 실패시킵니다.
 	 */
 	@Transactional
 	public void storeUploads(ChatRoom chatRoom, List<MultipartFile> files) {
 		if (files == null) {
 			return;
 		}
+		fileUploadPolicy.validate(files);
 
 		for (MultipartFile file : files) {
 			if (file == null || file.isEmpty() || file.getOriginalFilename() == null) {
@@ -45,7 +47,7 @@ public class FileAssetService {
 			}
 			try {
 				String originalName = file.getOriginalFilename();
-				String extension = extensionOf(originalName);
+				String extension = fileUploadPolicy.extensionOf(originalName);
 				String storedPath = fileStorageService.store(file.getBytes(), extension.isBlank() ? "bin" : extension);
 				String contentType = file.getContentType() == null
 					? "application/octet-stream" : file.getContentType();
@@ -55,13 +57,12 @@ public class FileAssetService {
 			} catch (IOException | RuntimeException e) {
 				log.error("업로드 파일 보관에 실패했습니다. chatRoomId={}, name={}",
 					chatRoom.getId(), file.getOriginalFilename(), e);
+				if (e instanceof CustomException customException) {
+					throw customException;
+				}
+				throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
 			}
 		}
-	}
-
-	private String extensionOf(String fileName) {
-		int dot = fileName.lastIndexOf('.');
-		return dot < 0 ? "" : fileName.substring(dot + 1).toLowerCase();
 	}
 
 	/**
