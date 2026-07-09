@@ -94,6 +94,7 @@ public class MaskingEngine {
 	public MaskingResult mask(String text, List<MaskingRule> rules, TokenAssigner tokenAssigner,
 		DetectionFilter detectionFilter) {
 		List<Detection> detections = new ArrayList<>();
+		boolean[] occupied = new boolean[text.length()];
 
 		for (MaskingRule rule : rules) {
 			if (rule.getType() == MaskingType.SQL_QUERY) {
@@ -110,7 +111,7 @@ public class MaskingEngine {
 				if (matcher.start() == matcher.end()) {
 					continue;
 				}
-				if (overlapsAccepted(detections, matcher.start(), matcher.end())) {
+				if (overlapsAccepted(occupied, matcher.start(), matcher.end())) {
 					continue;
 				}
 
@@ -122,30 +123,33 @@ public class MaskingEngine {
 				String token = tokenAssigner.assign(rule.getType(), value);
 				detections.add(new Detection(rule.getType(), value, token, matcher.start(), matcher.end(),
 					normalizeRuleName(rule.getType(), rule.getName())));
+				markAccepted(occupied, matcher.start(), matcher.end());
 			}
 		}
 
-		addSqlIdentifierDetections(text, detections, tokenAssigner);
-		propagateDetectedValues(text, detections);
+		addSqlIdentifierDetections(text, detections, occupied, tokenAssigner);
+		propagateDetectedValues(text, detections, occupied);
 
 		detections.sort(Comparator.comparingInt(Detection::startIndex));
 		return new MaskingResult(text, replaceWithTokens(text, detections), List.copyOf(detections));
 	}
 
-	private void addSqlIdentifierDetections(String text, List<Detection> detections, TokenAssigner tokenAssigner) {
+	private void addSqlIdentifierDetections(String text, List<Detection> detections, boolean[] occupied,
+		TokenAssigner tokenAssigner) {
 		List<SqlIdentifierExtractor.Item> sqlItems = SqlIdentifierExtractor.extract(text);
 		SqlSemanticTokenGenerator sqlTokens = SqlSemanticTokenGenerator.from(sqlItems);
 		Set<String> rememberedSqlMappings = new HashSet<>();
 		sqlTokens.aliasTokenToOriginal()
 			.forEach((token, original) -> rememberSqlToken(tokenAssigner, rememberedSqlMappings, original, token));
 		for (SqlIdentifierExtractor.Item item : sqlItems) {
-			if (overlapsAccepted(detections, item.start(), item.end())) {
+			if (overlapsAccepted(occupied, item.start(), item.end())) {
 				continue;
 			}
 			String token = sqlTokens.tokenFor(item);
 			rememberSqlToken(tokenAssigner, rememberedSqlMappings, item.value(), token);
 			detections.add(new Detection(MaskingType.SQL_QUERY, item.value(), token,
 				item.start(), item.end(), normalizeRuleName(MaskingType.SQL_QUERY, item.ruleName())));
+			markAccepted(occupied, item.start(), item.end());
 		}
 	}
 
@@ -178,7 +182,7 @@ public class MaskingEngine {
 	 * 이미 민감정보로 확정된 값의 리터럴 재등장만 치환하므로 새로운 오탐을 만들지 않고,
 	 * 한 곳이라도 잡히면 전체가 가려져 부분 노출을 막습니다.
 	 */
-	private void propagateDetectedValues(String text, List<Detection> detections) {
+	private void propagateDetectedValues(String text, List<Detection> detections, boolean[] occupied) {
 		List<Detection> seeds = List.copyOf(detections);
 		Set<String> propagated = new HashSet<>();
 
@@ -196,12 +200,13 @@ public class MaskingEngine {
 
 			Matcher matcher = Pattern.compile(Pattern.quote(seed.originalValue())).matcher(text);
 			while (matcher.find()) {
-				if (overlapsAccepted(detections, matcher.start(), matcher.end())) {
+				if (overlapsAccepted(occupied, matcher.start(), matcher.end())) {
 					continue;
 				}
 				// 같은 (type, value)이므로 시드와 같은 토큰을 재사용 (토큰 발급기 호출 불필요)
 				detections.add(new Detection(seed.type(), seed.originalValue(), seed.token(),
 					matcher.start(), matcher.end(), seed.ruleName()));
+				markAccepted(occupied, matcher.start(), matcher.end());
 			}
 		}
 	}
@@ -217,11 +222,16 @@ public class MaskingEngine {
 	 */
 	public MaskingResult maskManually(String text, String value, MaskingType type, TokenAssigner tokenAssigner) {
 		List<Detection> detections = new ArrayList<>();
+		boolean[] occupied = new boolean[text.length()];
 
 		Matcher matcher = Pattern.compile(Pattern.quote(value)).matcher(text);
 		while (matcher.find()) {
+			if (overlapsAccepted(occupied, matcher.start(), matcher.end())) {
+				continue;
+			}
 			String token = tokenAssigner.assign(type, value);
 			detections.add(new Detection(type, value, token, matcher.start(), matcher.end(), "수동 마스킹"));
+			markAccepted(occupied, matcher.start(), matcher.end());
 		}
 
 		return new MaskingResult(text, replaceWithTokens(text, detections), List.copyOf(detections));
@@ -296,13 +306,23 @@ public class MaskingEngine {
 	}
 
 	/** 새 매칭 구간 [start, end)가 이미 선점된 탐지 구간과 겹치는지 확인합니다. */
-	private boolean overlapsAccepted(List<Detection> accepted, int start, int end) {
-		for (Detection detection : accepted) {
-			if (start < detection.endIndex() && detection.startIndex() < end) {
+	private boolean overlapsAccepted(boolean[] occupied, int start, int end) {
+		int safeStart = Math.max(0, start);
+		int safeEnd = Math.min(occupied.length, end);
+		for (int i = safeStart; i < safeEnd; i++) {
+			if (occupied[i]) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	private void markAccepted(boolean[] occupied, int start, int end) {
+		int safeStart = Math.max(0, start);
+		int safeEnd = Math.min(occupied.length, end);
+		for (int i = safeStart; i < safeEnd; i++) {
+			occupied[i] = true;
+		}
 	}
 
 	/**

@@ -1,11 +1,13 @@
 package haitai.safemask.domain.chatmessage.service;
 
+import haitai.safemask.domain.fileasset.service.FileUploadPolicy;
 import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.ss.usermodel.Cell;
@@ -31,14 +33,17 @@ import org.springframework.web.multipart.MultipartFile;
  * 파일명/크기 안내만 전달합니다.
  */
 @Component
+@RequiredArgsConstructor
 public class AttachmentTextExtractor {
 
 	private static final int MAX_EXTRACTED_CHARS_PER_FILE = 30_000;
+	private final FileUploadPolicy fileUploadPolicy;
 
 	public String extract(List<MultipartFile> files) {
 		if (files == null || files.isEmpty()) {
 			return "";
 		}
+		fileUploadPolicy.validate(files);
 
 		StringBuilder builder = new StringBuilder();
 		builder.append("\n\n[첨부 파일]\n");
@@ -54,7 +59,7 @@ public class AttachmentTextExtractor {
 
 	private String extractOne(MultipartFile file) {
 		String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
-		String extension = extensionOf(filename);
+		String extension = fileUploadPolicy.extensionOf(filename);
 		try {
 			return switch (extension) {
 				case "txt", "csv" -> limit(new String(file.getBytes(), StandardCharsets.UTF_8));
@@ -156,16 +161,11 @@ public class AttachmentTextExtractor {
 			.trim();
 	}
 
-	private String extensionOf(String filename) {
-		int dot = filename.lastIndexOf('.');
-		return dot < 0 ? "" : filename.substring(dot + 1).toLowerCase();
-	}
-
 	private String limit(String text) {
 		if (text.length() <= MAX_EXTRACTED_CHARS_PER_FILE) {
 			return text;
 		}
-		return text.substring(0, MAX_EXTRACTED_CHARS_PER_FILE)
-			+ "\n...파일이 길어 앞부분만 추출했습니다.";
+		throw new CustomException(ErrorCode.INVALID_REQUEST,
+			"파일 내용이 너무 많아 한 번에 처리할 수 없습니다. 필요한 시트나 범위만 남겨 다시 업로드해 주세요.");
 	}
 }

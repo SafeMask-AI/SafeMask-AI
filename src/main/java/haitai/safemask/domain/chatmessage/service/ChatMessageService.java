@@ -39,7 +39,10 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
@@ -65,6 +68,7 @@ public class ChatMessageService {
 	private final FileAssetService fileAssetService;
 	private final ChatModel chatModel;
 	private final String modelName;
+	private final TransactionTemplate writeTransaction;
 
 	public ChatMessageService(ChatRoomRepository chatRoomRepository,
 		ChatMessageRepository chatMessageRepository,
@@ -75,6 +79,7 @@ public class ChatMessageService {
 		GeneratedFileService generatedFileService,
 		FileAssetService fileAssetService,
 		ChatModel chatModel,
+		PlatformTransactionManager transactionManager,
 		@Value("${safemask.ai.model:gpt-5.5}") String modelName) {
 		this.chatRoomRepository = chatRoomRepository;
 		this.chatMessageRepository = chatMessageRepository;
@@ -86,6 +91,10 @@ public class ChatMessageService {
 		this.fileAssetService = fileAssetService;
 		this.chatModel = chatModel;
 		this.modelName = modelName;
+		this.writeTransaction = new TransactionTemplate(transactionManager);
+	}
+
+	private record InitialUserWrite(Long chatRoomId, Long userMessageId, Long aiRunId) {
 	}
 
 	/**
@@ -95,12 +104,12 @@ public class ChatMessageService {
 	 * 탐지 0건이거나 approved=true인 요청은 maskedContent 기준으로 이전 대화 맥락을 구성해
 	 * GPT에 전송하고, 응답은 Redis 매핑으로 원복해 저장합니다.
 	 */
-	@Transactional
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public ChatSendResponse send(Member member, ChatSendRequest request) {
 		return sendInternal(member, request, request.content(), null);
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public ChatSendResponse sendWithFiles(Member member, ChatSendRequest request, List<MultipartFile> files) {
 		String attachmentText = attachmentTextExtractor.extract(files);
 		String baseContent = request.content() == null ? "" : request.content().trim();
@@ -127,17 +136,26 @@ public class ChatMessageService {
 				maskingResult.summary(), detections);
 		}
 
-		// 첨부 원본을 사내 스토리지에 보관한다. (미리보기 단계에서는 저장하지 않고,
-		// 사용자가 전송을 확정한 시점에만 보관 — AI 편집 요청 시 카피의 출발점이 된다)
-		fileAssetService.storeUploads(chatRoom, files);
+		// 첨부 원본은 미리보기 단계에서는 저장하지 않고, 사용자가 전송을 확정한 시점에만 보관한다.
+		// AI 호출은 이 쓰기 트랜잭션이 끝난 뒤 실행해 DB 커넥션을 오래 붙잡지 않는다.
+		InitialUserWrite write = saveApprovedUserMessage(chatRoom.getId(), displayContent, maskingResult, files);
+		return generateAnswer(write.chatRoomId(), write.userMessageId(), write.aiRunId(),
+			maskingResult.summary(), detections);
+	}
 
-		ChatMessage userMessage = chatMessageRepository.save(
-			ChatMessage.create(chatRoom, MessageRole.USER, displayContent, maskingResult.maskedText()));
-		chatRoom.touch();
-		AiRun aiRun = aiRunRepository.save(AiRun.createApproved(chatRoom, userMessage));
-		saveMaskingAudit(aiRun, maskingResult.detections());
-
-		return generateAnswer(chatRoom, userMessage, aiRun, maskingResult.summary(), detections);
+	private InitialUserWrite saveApprovedUserMessage(Long chatRoomId, String displayContent, MaskingResult maskingResult,
+		List<MultipartFile> files) {
+		return writeTransaction.execute(status -> {
+			ChatRoom managedChatRoom = chatRoomRepository.findById(chatRoomId)
+				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
+			fileAssetService.storeUploads(managedChatRoom, files);
+			ChatMessage userMessage = chatMessageRepository.save(
+				ChatMessage.create(managedChatRoom, MessageRole.USER, displayContent, maskingResult.maskedText()));
+			managedChatRoom.touch();
+			AiRun aiRun = aiRunRepository.save(AiRun.createApproved(managedChatRoom, userMessage));
+			saveMaskingAudit(aiRun, maskingResult.detections());
+			return new InitialUserWrite(managedChatRoom.getId(), userMessage.getId(), aiRun.getId());
+		});
 	}
 
 	/**
@@ -147,48 +165,87 @@ public class ChatMessageService {
 	 * 호출하므로, 마스킹·원복 흐름은 최초 전송과 동일하게 동작합니다.
 	 * 이전 답변의 AiRun·마스킹 감사 기록은 이력 추적을 위해 삭제하지 않습니다.
 	 */
-	@Transactional
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public ChatSendResponse regenerate(Member member, Long chatRoomId) {
 		if (chatRoomId == null) {
 			throw new CustomException(ErrorCode.INVALID_REQUEST);
 		}
-		ChatRoom chatRoom = chatRoomRepository.findByIdAndMember_IdAndStatus(chatRoomId, member.getId(),
-				ChatRoomStatus.ACTIVE)
-			.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
+		InitialUserWrite write = writeTransaction.execute(status -> {
+			ChatRoom chatRoom = chatRoomRepository.findByIdAndMember_IdAndStatus(chatRoomId, member.getId(),
+					ChatRoomStatus.ACTIVE)
+				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
 
-		// createdAt은 같은 요청에서 만들어진 행끼리 동률일 수 있어, 확정적인 id 기준으로 정렬한다
-		List<ChatMessage> messages = new ArrayList<>(chatMessageRepository.findByChatRoomOrderByCreatedAtDesc(chatRoom));
-		messages.sort(Comparator.comparing(ChatMessage::getId).reversed());
+			// createdAt은 같은 요청에서 만들어진 행끼리 동률일 수 있어, 확정적인 id 기준으로 정렬한다
+			List<ChatMessage> messages = new ArrayList<>(
+				chatMessageRepository.findRecentByChatRoomIdOrderByIdDesc(chatRoom.getId(), CONTEXT_MESSAGE_LIMIT));
+			messages.sort(Comparator.comparing(ChatMessage::getId).reversed());
 
-		if (messages.isEmpty() || messages.get(0).getRole() != MessageRole.ASSISTANT) {
-			throw new CustomException(ErrorCode.INVALID_REQUEST, "다시 생성할 AI 답변이 없습니다.");
-		}
-		ChatMessage lastUserMessage = messages.stream()
-			.filter(message -> message.getRole() == MessageRole.USER)
-			.findFirst()
-			.orElseThrow(() -> new CustomException(ErrorCode.INVALID_REQUEST, "다시 생성할 AI 답변이 없습니다."));
+			if (messages.isEmpty() || messages.get(0).getRole() != MessageRole.ASSISTANT) {
+				throw new CustomException(ErrorCode.INVALID_REQUEST, "다시 생성할 AI 답변이 없습니다.");
+			}
+			ChatMessage lastUserMessage = messages.stream()
+				.filter(message -> message.getRole() == MessageRole.USER)
+				.findFirst()
+				.orElseThrow(() -> new CustomException(ErrorCode.INVALID_REQUEST, "다시 생성할 AI 답변이 없습니다."));
 
-		ChatMessage lastAssistantMessage = messages.get(0);
-		generatedFileService.retireGeneratedFilesFromAnswer(chatRoom, lastAssistantMessage.getOriginalContent());
-		chatMessageRepository.delete(lastAssistantMessage);
-		chatRoom.touch();
-		AiRun aiRun = aiRunRepository.save(AiRun.createApproved(chatRoom, lastUserMessage));
+			ChatMessage lastAssistantMessage = messages.get(0);
+			generatedFileService.retireGeneratedFilesFromAnswer(chatRoom, lastAssistantMessage.getOriginalContent());
+			chatMessageRepository.delete(lastAssistantMessage);
+			chatRoom.touch();
+			AiRun aiRun = aiRunRepository.save(AiRun.createApproved(chatRoom, lastUserMessage));
+			return new InitialUserWrite(chatRoom.getId(), lastUserMessage.getId(), aiRun.getId());
+		});
 
 		// 재생성은 새 입력이 없으므로 마스킹 요약·탐지 정보 없이 답변만 새로 만든다
-		return generateAnswer(chatRoom, lastUserMessage, aiRun, Map.of(), List.of());
+		return generateAnswer(write.chatRoomId(), write.userMessageId(), write.aiRunId(), Map.of(), List.of());
 	}
 
 	/**
 	 * 채팅방의 현재 대화 맥락으로 GPT를 호출해 답변을 만들고 저장합니다.
 	 * (최초 전송과 답변 재생성이 공유하는 공통 경로)
 	 */
-	private ChatSendResponse generateAnswer(ChatRoom chatRoom, ChatMessage userMessage, AiRun aiRun,
+	private ChatSendResponse generateAnswer(Long chatRoomId, Long userMessageId, Long aiRunId,
 		Map<MaskingType, Long> summary, List<MaskingDetectionResponse> detections) {
 		try {
-			aiRun.markCalling(modelName);
+			markAiRunCalling(aiRunId);
+			ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
+				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
 			ChatResponse response = chatModel.call(new Prompt(buildPromptMessages(chatRoom)));
 			String maskedAnswer = response.getResult().getOutput().getText();
 			String restoredAnswer = maskingService.restore(chatRoom.getId(), maskedAnswer);
+			Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
+			return saveAssistantAnswer(chatRoomId, userMessageId, aiRunId, restoredAnswer, maskedAnswer,
+				resolveModel(response), usage, summary, detections);
+		} catch (RuntimeException e) {
+			markAiRunFailed(aiRunId, e.getMessage());
+			if (e instanceof CustomException customException) {
+				throw customException;
+			}
+			throw new CustomException(ErrorCode.AI_SERVICE_UNAVAILABLE, e);
+		}
+	}
+
+	private void markAiRunCalling(Long aiRunId) {
+		writeTransaction.executeWithoutResult(status -> aiRunRepository.findById(aiRunId)
+			.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND))
+			.markCalling(modelName));
+	}
+
+	private void markAiRunFailed(Long aiRunId, String message) {
+		writeTransaction.executeWithoutResult(status -> aiRunRepository.findById(aiRunId)
+			.ifPresent(aiRun -> aiRun.markFailed(message)));
+	}
+
+	private ChatSendResponse saveAssistantAnswer(Long chatRoomId, Long userMessageId, Long aiRunId,
+		String restoredAnswer, String maskedAnswer, String responseModel, Usage usage,
+		Map<MaskingType, Long> summary, List<MaskingDetectionResponse> detections) {
+		return writeTransaction.execute(status -> {
+			ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
+				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
+			ChatMessage userMessage = chatMessageRepository.findById(userMessageId)
+				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
+			AiRun aiRun = aiRunRepository.findById(aiRunId)
+				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
 
 			// 원복이 끝난 응답에서 파일 블록을 실제 파일로 변환하고 안내 문구로 치환.
 			// (원복 후에 실행해야 파일에 토큰이 아닌 원본값이 담긴다)
@@ -199,16 +256,12 @@ public class ChatMessageService {
 			ChatMessage assistantMessage = chatMessageRepository.save(
 				ChatMessage.create(chatRoom, MessageRole.ASSISTANT, fileOutcome.displayContent(), maskedAnswer));
 
-			Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
-			aiRun.markCompleted(resolveModel(response), usage == null ? null : usage.getPromptTokens(),
+			aiRun.markCompleted(responseModel, usage == null ? null : usage.getPromptTokens(),
 				usage == null ? null : usage.getCompletionTokens());
 
 			return ChatSendResponse.completed(chatRoom.getId(), userMessage.getId(), assistantMessage.getId(),
 				fileOutcome.displayContent(), summary, detections, fileOutcome.files());
-		} catch (RuntimeException e) {
-			aiRun.markFailed(e.getMessage());
-			throw new CustomException(ErrorCode.AI_SERVICE_UNAVAILABLE, e);
-		}
+		});
 	}
 
 	private void validateRequest(ChatSendRequest request) {
@@ -289,10 +342,7 @@ public class ChatMessageService {
 
 	private List<Message> buildPromptMessages(ChatRoom chatRoom) {
 		List<ChatMessage> recentMessages = new ArrayList<>(
-			chatMessageRepository.findByChatRoomOrderByCreatedAtDesc(chatRoom));
-		if (recentMessages.size() > CONTEXT_MESSAGE_LIMIT) {
-			recentMessages = new ArrayList<>(recentMessages.subList(0, CONTEXT_MESSAGE_LIMIT));
-		}
+			chatMessageRepository.findRecentByChatRoomIdOrderByIdDesc(chatRoom.getId(), CONTEXT_MESSAGE_LIMIT));
 		Collections.reverse(recentMessages);
 
 		List<Message> messages = new ArrayList<>();

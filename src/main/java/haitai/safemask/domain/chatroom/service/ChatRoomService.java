@@ -11,6 +11,8 @@ import haitai.safemask.domain.masking.service.MaskingService;
 import haitai.safemask.domain.member.entity.Member;
 import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -21,16 +23,18 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class ChatRoomService {
 
+	private static final int ROOM_LIST_LIMIT = 30;
+	private static final int MESSAGE_HISTORY_LIMIT = 200;
+
 	private final ChatRoomRepository chatRoomRepository;
 	private final ChatMessageRepository chatMessageRepository;
 	private final MaskingService maskingService;
 	private final FileAssetService fileAssetService;
 
 	public List<ChatRoomResponse> findMyRooms(Member member) {
-		return chatRoomRepository.findByMember_IdAndStatusOrderByUpdatedAtDesc(member.getId(),
-				ChatRoomStatus.ACTIVE)
+		return chatRoomRepository.findRecentByMemberIdAndStatus(member.getId(),
+				ChatRoomStatus.ACTIVE.name(), ROOM_LIST_LIMIT)
 			.stream()
-			.limit(30)
 			.map(ChatRoomResponse::from)
 			.toList();
 	}
@@ -40,10 +44,13 @@ public class ChatRoomService {
 				ChatRoomStatus.ACTIVE)
 			.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
 
-		return chatMessageRepository.findByChatRoomOrderByCreatedAtAsc(chatRoom)
+		List<ChatMessageHistoryResponse> recentMessages = new ArrayList<>(chatMessageRepository
+			.findRecentByChatRoomIdOrderByIdDesc(chatRoom.getId(), MESSAGE_HISTORY_LIMIT)
 			.stream()
 			.map(ChatMessageHistoryResponse::from)
-			.toList();
+			.toList());
+		Collections.reverse(recentMessages);
+		return recentMessages;
 	}
 
 	@Transactional
