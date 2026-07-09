@@ -74,6 +74,7 @@
 	const previewApproveButton = document.getElementById('previewApproveButton');
 	const previewCancelButton = document.getElementById('previewCancelButton');
 	const previewEditButton = document.getElementById('previewEditButton');
+	const previewDownloadButton = document.getElementById('previewDownloadButton');
 	const manualMaskValue = document.getElementById('manualMaskValue');
 	const manualMaskType = document.getElementById('manualMaskType');
 	const manualMaskAddButton = document.getElementById('manualMaskAddButton');
@@ -165,6 +166,7 @@
 		}
 		messageInput.focus();
 	});
+	previewDownloadButton.addEventListener('click', downloadMaskingPreview);
 
 	manualMaskAddButton.addEventListener('click', addManualMask);
 	manualMaskValue.addEventListener('keydown', function (event) {
@@ -970,6 +972,74 @@
 		}
 	}
 
+	async function downloadMaskingPreview() {
+		if (!pendingPreview || currentChatRoomId === null) {
+			return;
+		}
+
+		previewDownloadButton.disabled = true;
+		try {
+			const formData = new FormData();
+			formData.append('chatRoomId', String(currentChatRoomId));
+			formData.append('content', pendingPreview.content || '');
+			formData.append('manualMasks', JSON.stringify(manualMasks));
+			attachedFiles.forEach(function (file) {
+				formData.append('files', file);
+			});
+
+			const response = await authorizedFetch('/api/chat/messages/preview-download', {
+				method: 'POST',
+				body: formData
+			});
+			if (!response.ok) {
+				const error = await readResponseBody(response);
+				throw new Error(error.message || '미리보기 파일을 만들지 못했습니다.');
+			}
+
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = resolveDownloadFileName(response, fallbackPreviewFileName());
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			URL.revokeObjectURL(url);
+		} catch (error) {
+			appendMessage('system', error.message || '미리보기 파일을 다운로드하지 못했습니다.');
+		} finally {
+			previewDownloadButton.disabled = false;
+		}
+	}
+
+	function resolveDownloadFileName(response, fallback) {
+		const disposition = response.headers.get('content-disposition') || '';
+		const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+		if (utf8Match) {
+			try {
+				return decodeURIComponent(utf8Match[1]);
+			} catch (e) {
+				return utf8Match[1];
+			}
+		}
+		const plainMatch = disposition.match(/filename="?([^"]+)"?/i);
+		return plainMatch ? plainMatch[1] : fallback;
+	}
+
+	function fallbackPreviewFileName() {
+		if (attachedFiles.length > 1) {
+			return 'masked-preview.zip';
+		}
+		if (attachedFiles.length === 1) {
+			const fileName = attachedFiles[0].name || 'masked-preview.txt';
+			const dot = fileName.lastIndexOf('.');
+			const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+			const extension = dot > 0 ? fileName.slice(dot + 1) : 'txt';
+			return `${base}_masked.${extension}`;
+		}
+		return 'masked-preview.txt';
+	}
+
 	function showPreview(data) {
 		const summary = data.summary || {};
 		const totalCount = Object.values(summary).reduce(function (sum, count) {
@@ -1719,6 +1789,7 @@
 		sending = value;
 		sendButton.disabled = false;
 		previewApproveButton.disabled = value;
+		previewDownloadButton.disabled = value;
 		sendButton.textContent = value ? '■' : '↑';
 		sendButton.title = value ? '전송 취소' : '전송';
 		sendButton.classList.toggle('cancel-mode', value);

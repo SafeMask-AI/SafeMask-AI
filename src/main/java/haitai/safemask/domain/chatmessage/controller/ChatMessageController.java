@@ -8,11 +8,16 @@ import haitai.safemask.domain.chatmessage.dto.ChatSendRequest;
 import haitai.safemask.domain.chatmessage.dto.ChatSendResponse;
 import haitai.safemask.domain.chatmessage.dto.ManualMaskRequest;
 import haitai.safemask.domain.chatmessage.service.ChatMessageService;
+import haitai.safemask.domain.chatmessage.service.MaskingPreviewDownloadService;
+import haitai.safemask.domain.chatmessage.service.MaskingPreviewDownloadService.PreviewDownloadFile;
 import haitai.safemask.domain.member.entity.Member;
 import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -30,6 +35,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class ChatMessageController {
 
 	private final ChatMessageService chatMessageService;
+	private final MaskingPreviewDownloadService maskingPreviewDownloadService;
 	private final ObjectMapper objectMapper;
 
 	@PostMapping
@@ -56,6 +62,25 @@ public class ChatMessageController {
 		List<ManualMaskRequest> masks = parseManualMasks(manualMasks);
 		ChatSendRequest request = new ChatSendRequest(chatRoomId, content, approved, masks);
 		return ResponseEntity.ok(chatMessageService.sendWithFiles(member, request, files));
+	}
+
+	@PostMapping(value = "/preview-download", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	public ResponseEntity<byte[]> downloadPreview(@AuthenticationPrincipal Member member,
+		@RequestParam Long chatRoomId,
+		@RequestParam(required = false, defaultValue = "") String content,
+		@RequestParam(defaultValue = "[]") String manualMasks,
+		@RequestPart(value = "files", required = false) List<MultipartFile> files) {
+
+		PreviewDownloadFile file = maskingPreviewDownloadService.build(member, chatRoomId, content,
+			parseManualMasks(manualMasks), files);
+		ContentDisposition disposition = ContentDisposition.attachment()
+			.filename(file.fileName(), StandardCharsets.UTF_8)
+			.build();
+
+		return ResponseEntity.ok()
+			.header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+			.contentType(MediaType.parseMediaType(file.contentType()))
+			.body(file.bytes());
 	}
 
 
