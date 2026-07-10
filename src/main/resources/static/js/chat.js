@@ -1,5 +1,23 @@
 (function () {
-	const accessToken = localStorage.getItem('accessToken');
+	function readAuthValue(key) {
+		return localStorage.getItem(key) || sessionStorage.getItem(key);
+	}
+
+	function removeAuthValue(key) {
+		localStorage.removeItem(key);
+		sessionStorage.removeItem(key);
+	}
+
+	function writeAuthValue(key, value) {
+		const targetStorage = localStorage.getItem('authPersistence') === 'local' ? localStorage : sessionStorage;
+		targetStorage.setItem(key, value);
+	}
+
+	function rememberLoginEnabled() {
+		return localStorage.getItem('authPersistence') === 'local';
+	}
+
+	let accessToken = readAuthValue('accessToken');
 
 	if (!accessToken) {
 		window.location.href = '/login';
@@ -52,8 +70,8 @@
 		CUSTOM: '사용자 지정'
 	};
 
-	const name = localStorage.getItem('memberName') || '사용자';
-	const department = localStorage.getItem('memberDepartment') || '';
+	const name = readAuthValue('memberName') || '사용자';
+	const department = readAuthValue('memberDepartment') || '';
 
 	document.getElementById('userAvatar').textContent = name.charAt(0);
 	document.getElementById('userName').textContent = name;
@@ -860,11 +878,10 @@
 		const statusRow = appendStatusMessage('답변을 다시 생성하는 중...');
 
 		try {
-			const response = await fetch('/api/chat/messages/regenerate', {
+			const response = await authorizedFetch('/api/chat/messages/regenerate', {
 				method: 'POST',
 				headers: {
-					'Content-Type': 'application/json',
-					'Authorization': `Bearer ${accessToken}`
+					'Content-Type': 'application/json'
 				},
 				body: JSON.stringify({ chatRoomId: currentChatRoomId }),
 				signal: requestState.controller.signal
@@ -1379,11 +1396,10 @@
 
 	function sendChatRequest(content, approved, signal) {
 		if (attachedFiles.length === 0) {
-			return fetch('/api/chat/messages', {
+			return authorizedFetch('/api/chat/messages', {
 				method: 'POST',
 				headers: {
-					'Content-Type': 'application/json',
-					'Authorization': `Bearer ${accessToken}`
+					'Content-Type': 'application/json'
 				},
 				body: JSON.stringify({
 					chatRoomId: currentChatRoomId,
@@ -1406,11 +1422,8 @@
 			formData.append('files', file);
 		});
 
-		return fetch('/api/chat/messages/with-files', {
+		return authorizedFetch('/api/chat/messages/with-files', {
 			method: 'POST',
-			headers: {
-				'Authorization': `Bearer ${accessToken}`
-			},
 			body: formData,
 			signal: signal
 		});
@@ -1740,18 +1753,48 @@
 		});
 	}
 
-	function authorizedFetch(url, options) {
-		const fetchOptions = options || {};
+	async function refreshAccessToken() {
+		const response = await fetch('/api/auth/refresh', {
+			method: 'POST',
+			headers: { 'X-Remember-Login': String(rememberLoginEnabled()) }
+		});
+		if (!response.ok) {
+			return false;
+		}
+		const data = await response.json();
+		if (!data.accessToken) {
+			return false;
+		}
+		accessToken = data.accessToken;
+		writeAuthValue('accessToken', data.accessToken);
+		return true;
+	}
+
+	async function authorizedFetch(url, options) {
+		const fetchOptions = { ...(options || {}) };
 		fetchOptions.headers = {
 			...(fetchOptions.headers || {}),
 			'Authorization': `Bearer ${accessToken}`
 		};
-		return fetch(url, fetchOptions).then(function (response) {
-			if (response.status === 401) {
-				forceLogout();
-			}
+		const response = await fetch(url, fetchOptions);
+		if (response.status !== 401) {
 			return response;
-		});
+		}
+
+		const refreshed = await refreshAccessToken();
+		if (!refreshed) {
+			forceLogout();
+			return response;
+		}
+		if (fetchOptions.signal && fetchOptions.signal.aborted) {
+			return response;
+		}
+
+		fetchOptions.headers = {
+			...(fetchOptions.headers || {}),
+			'Authorization': `Bearer ${accessToken}`
+		};
+		return fetch(url, fetchOptions);
 	}
 
 	function resolveRequestErrorMessage(error) {
@@ -1808,10 +1851,11 @@
 	}
 
 	function forceLogout() {
-		localStorage.removeItem('accessToken');
-		localStorage.removeItem('memberName');
-		localStorage.removeItem('memberDepartment');
-		localStorage.removeItem('memberRole');
+		removeAuthValue('accessToken');
+		removeAuthValue('memberName');
+		removeAuthValue('memberDepartment');
+		removeAuthValue('memberRole');
+		removeAuthValue('authPersistence');
 		window.location.href = '/login';
 	}
 

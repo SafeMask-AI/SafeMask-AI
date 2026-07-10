@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -111,7 +112,8 @@ public class AuthController {
 		LoginResult result = authService.login(request);
 
 		return ResponseEntity.ok()
-			.header(HttpHeaders.SET_COOKIE, createRefreshTokenCookie(result.refreshToken()).toString())
+			.header(HttpHeaders.SET_COOKIE,
+				createRefreshTokenCookie(result.refreshToken(), Boolean.TRUE.equals(request.rememberMe())).toString())
 			.body(result.response());
 	}
 
@@ -124,7 +126,8 @@ public class AuthController {
 	 */
 	@PostMapping("/refresh")
 	public ResponseEntity<TokenRefreshResponse> refresh(
-		@CookieValue(value = REFRESH_TOKEN_COOKIE, required = false) String refreshToken
+		@CookieValue(value = REFRESH_TOKEN_COOKIE, required = false) String refreshToken,
+		@RequestHeader(value = "X-Remember-Login", required = false) String rememberLogin
 	) {
 		// 쿠키 자체가 없으면(만료·삭제됨) 재로그인 대상입니다.
 		if (refreshToken == null || refreshToken.isBlank()) {
@@ -134,7 +137,8 @@ public class AuthController {
 		TokenRefreshResult result = authService.refresh(refreshToken);
 
 		return ResponseEntity.ok()
-			.header(HttpHeaders.SET_COOKIE, createRefreshTokenCookie(result.refreshToken()).toString())
+			.header(HttpHeaders.SET_COOKIE,
+				createRefreshTokenCookie(result.refreshToken(), Boolean.parseBoolean(rememberLogin)).toString())
 			.body(new TokenRefreshResponse(result.accessToken()));
 	}
 
@@ -167,14 +171,16 @@ public class AuthController {
 	 * - path=/api/auth: 인증 API 요청에만 쿠키가 실려 불필요한 노출 최소화
 	 * - secure(false): 로컬 http 개발 환경용. HTTPS로 배포할 때 true로 바꿔야 합니다.
 	 */
-	private ResponseCookie createRefreshTokenCookie(String token) {
-		return ResponseCookie.from(REFRESH_TOKEN_COOKIE, token)
+	private ResponseCookie createRefreshTokenCookie(String token, boolean persistent) {
+		ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(REFRESH_TOKEN_COOKIE, token)
 			.httpOnly(true)
 			.secure(false)
 			.sameSite("Strict")
-			.path("/api/auth")
-			.maxAge(Duration.ofMillis(jwtProperties.getRefreshTokenExpiration()))
-			.build();
+			.path("/api/auth");
+		if (persistent) {
+			builder.maxAge(Duration.ofMillis(jwtProperties.getRefreshTokenExpiration()));
+		}
+		return builder.build();
 	}
 
 	/** maxAge=0 쿠키를 내려보내 브라우저에 저장된 Refresh Token 쿠키를 삭제합니다. */
