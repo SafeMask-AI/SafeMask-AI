@@ -13,8 +13,9 @@
 			<div class="login-logo-block">
 				<img th:src="@{/images/login-haetae-logo.jpg}" alt="해태" class="login-logo">
 				<div>
-					<h1 id="loginTitle" class="login-title">SafeMask 로그인</h1>
-					<p class="login-subtitle">사번과 비밀번호로 로그인하세요</p>
+					<p class="login-eyebrow">해태인의 AI 동료</p>
+					<h1 id="loginTitle" class="login-title">SafeMask</h1>
+					<p class="login-subtitle">개인정보를 안전하게 보호하는 AI 마스킹 시스템</p>
 				</div>
 			</div>
 
@@ -76,7 +77,7 @@
 
 			<p class="login-signup-link">
 				아직 계정이 없으신가요?
-				<a th:href="@{/signup}">회원가입</a>
+				<button type="button" id="showSignupButton" class="login-signup-action">회원가입</button>
 			</p>
 
 			<div class="login-help">
@@ -84,6 +85,10 @@
 				<p>계정 문의는 IT 개발팀으로 문의해 주세요.</p>
 			</div>
 		</div>
+	</section>
+
+	<section id="signupCard" class="signup-card login-inline-signup" aria-labelledby="signupTitle" hidden>
+		<th:block th:replace="~{auth/fragments/signup-card :: signupCard}"></th:block>
 	</section>
 
 	<section class="login-visual-panel" aria-label="SafeMask 소개">
@@ -140,13 +145,14 @@
 		</div>
 
 		<footer class="login-visual-footer">
-			<span>&copy; 2026 HAETAE Confectionery &amp; Foods</span>
+			<span>&copy; 2026 HAETAE Confectionery</span>
 			<span class="login-footer-dot" aria-hidden="true"></span>
 			<span>사내 전용 시스템</span>
 		</footer>
 	</section>
 </main>
 
+<script th:src="@{/js/signup.js}"></script>
 <script th:src="@{/js/login.js}"></script>
 </body>
 </html>

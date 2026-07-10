@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<body>
+<div th:fragment="signupCard" class="signup-card-inner">
+	<header class="signup-header">
+		<img th:src="@{/images/login-haetae-logo.jpg}" alt="해태" class="login-logo">
+		<p class="login-eyebrow">해태인의 AI 동료</p>
+		<h1 id="signupTitle" class="signup-title">회원가입</h1>
+		<p class="signup-subtitle">SafeMask 계정 정보를 단계별로 입력해 주세요.</p>
+	</header>
+
+	<!-- signup.js가 현재 단계와 완료 단계를 함께 갱신합니다. -->
+	<div class="step-indicator" id="stepIndicator" aria-label="회원가입 진행 단계">
+		<span class="step active" data-step="1" aria-current="step">1</span>
+		<span class="step-line"></span>
+		<span class="step" data-step="2">2</span>
+		<span class="step-line"></span>
+		<span class="step" data-step="3">3</span>
+		<span class="step-line"></span>
+		<span class="step" data-step="4">4</span>
+	</div>
+
+	<form id="signupForm" novalidate>
+		<!-- 1단계: 사번 (중복 확인 후 다음 단계로) -->
+		<div class="signup-step active" data-step="1">
+			<div class="form-group">
+				<label for="signupLoginId">사번</label>
+				<input type="text" id="signupLoginId" placeholder="예) 20194412" autocomplete="username">
+				<p class="field-hint">로그인 아이디로 사용됩니다.</p>
+			</div>
+			<p id="message1" class="form-message error"></p>
+			<button type="button" class="btn-primary" id="nextButton1">다음</button>
+		</div>
+
+		<!-- 2단계: 이메일 (중복 확인 후 다음 단계로) -->
+		<div class="signup-step" data-step="2">
+			<div class="form-group">
+				<label for="signupEmail">이메일</label>
+				<input type="email" id="signupEmail" placeholder="예) hong@haitai.co.kr" autocomplete="email">
+			</div>
+			<p id="message2" class="form-message error"></p>
+			<button type="button" class="btn-primary" id="nextButton2">다음</button>
+			<button type="button" class="btn-secondary" data-prev="1">이전</button>
+		</div>
+
+		<!-- 3단계: 이름 / 부서 -->
+		<div class="signup-step" data-step="3">
+			<div class="form-group">
+				<label for="signupName">이름</label>
+				<input type="text" id="signupName" placeholder="예) 홍길동" autocomplete="name">
+			</div>
+			<div class="form-group">
+				<label for="signupDepartment">부서</label>
+				<input type="text" id="signupDepartment" placeholder="예) 마케팅팀">
+			</div>
+			<p id="message3" class="form-message error"></p>
+			<button type="button" class="btn-primary" id="nextButton3">다음</button>
+			<button type="button" class="btn-secondary" data-prev="2">이전</button>
+		</div>
+
+		<!-- 4단계: 비밀번호 설정 후 최종 가입 -->
+		<div class="signup-step" data-step="4">
+			<div class="form-group">
+				<label for="signupPassword">비밀번호</label>
+				<input type="password" id="signupPassword" placeholder="8자 이상, 영문자와 숫자 포함"
+					autocomplete="new-password">
+			</div>
+			<div class="form-group">
+				<label for="signupPasswordConfirm">비밀번호 확인</label>
+				<input type="password" id="signupPasswordConfirm" placeholder="비밀번호를 한 번 더 입력하세요"
+					autocomplete="new-password">
+			</div>
+			<p id="message4" class="form-message error"></p>
+			<button type="submit" class="btn-primary" id="submitButton">가입하기</button>
+			<button type="button" class="btn-secondary" data-prev="3">이전</button>
+		</div>
+	</form>
+
+	<p class="signup-login-link">
+		이미 계정이 있으신가요?<a id="showLoginLink" th:href="@{/login}">로그인</a>
+	</p>
+</div>
+</body>
+</html>

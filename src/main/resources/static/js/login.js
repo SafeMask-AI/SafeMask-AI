@@ -39,6 +39,10 @@
 	const passwordInput = document.getElementById('password');
 	const togglePassword = document.getElementById('togglePassword');
 	const rememberLogin = document.getElementById('rememberLogin');
+	const loginCard = document.querySelector('.login-form-panel');
+	const signupCard = document.getElementById('signupCard');
+	const showSignupButton = document.getElementById('showSignupButton');
+	const showLoginLink = document.getElementById('showLoginLink');
 
 	(async function redirectIfRefreshable() {
 		if (!rememberLoginEnabled()) {
@@ -74,6 +78,36 @@
 			togglePassword.classList.toggle('is-visible', !isVisible);
 			togglePassword.setAttribute('aria-pressed', String(!isVisible));
 			togglePassword.setAttribute('aria-label', isVisible ? '비밀번호 표시' : '비밀번호 숨기기');
+		});
+	}
+
+	/** URL과 배경은 유지한 채 같은 프레임에서 중앙 인증 카드 내용을 교체합니다. */
+	function switchAuthCard(outgoingCard, incomingCard, focusSelector) {
+		if (!outgoingCard || !incomingCard) {
+			return;
+		}
+
+		outgoingCard.hidden = true;
+		outgoingCard.setAttribute('aria-hidden', 'true');
+		incomingCard.hidden = false;
+		incomingCard.removeAttribute('aria-hidden');
+
+		const focusTarget = incomingCard.querySelector(focusSelector);
+		if (focusTarget) {
+			focusTarget.focus({ preventScroll: true });
+		}
+	}
+
+	if (showSignupButton) {
+		showSignupButton.addEventListener('click', function () {
+			switchAuthCard(loginCard, signupCard, 'input');
+		});
+	}
+
+	if (showLoginLink) {
+		showLoginLink.addEventListener('click', function (event) {
+			event.preventDefault();
+			switchAuthCard(signupCard, loginCard, '#loginId');
 		});
 	}
 

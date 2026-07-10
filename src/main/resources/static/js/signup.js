@@ -11,26 +11,98 @@
  */
 (function () {
 	let currentStep = 1;
+	let isTransitioning = false;
 	const TOTAL_STEPS = 4;
 
 	const form = document.getElementById('signupForm');
+	const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 	// ==================== 단계 전환 ====================
 
-	/** 지정한 단계 패널만 보이게 하고 상단 진행 표시를 갱신합니다. */
-	function goToStep(step) {
-		currentStep = step;
-
-		document.querySelectorAll('.signup-step').forEach(function (panel) {
-			panel.classList.toggle('active', Number(panel.dataset.step) === step);
-		});
-
+	/** 상단 진행 표시와 스크린 리더용 현재 단계 정보를 함께 갱신합니다. */
+	function updateStepIndicator(step) {
 		document.querySelectorAll('#stepIndicator .step').forEach(function (dot) {
 			const dotStep = Number(dot.dataset.step);
 			dot.classList.toggle('active', dotStep === step);
 			dot.classList.toggle('done', dotStep < step);
+
+			if (dotStep === step) {
+				dot.setAttribute('aria-current', 'step');
+			} else {
+				dot.removeAttribute('aria-current');
+			}
 		});
 	}
+
+	/** CSS 애니메이션 종료를 기다리되 이벤트 누락 시 타임아웃으로 전환을 완료합니다. */
+	function waitForAnimation(element, timeout) {
+		return new Promise(function (resolve) {
+			let completed = false;
+
+			function finish(event) {
+				if (event && event.target !== element) {
+					return;
+				}
+				if (completed) {
+					return;
+				}
+				completed = true;
+				element.removeEventListener('animationend', finish);
+				resolve();
+			}
+
+			element.addEventListener('animationend', finish);
+			window.setTimeout(finish, timeout);
+		});
+	}
+
+	/** 현재 패널을 내보낸 뒤 이동 방향에 맞춰 다음 패널을 진입시킵니다. */
+	async function goToStep(step) {
+		if (step < 1 || step > TOTAL_STEPS || step === currentStep || isTransitioning) {
+			return;
+		}
+
+		const currentPanel = document.querySelector('.signup-step[data-step="' + currentStep + '"]');
+		const nextPanel = document.querySelector('.signup-step[data-step="' + step + '"]');
+		const direction = step > currentStep ? 'forward' : 'backward';
+		const leaveClass = direction === 'forward' ? 'is-leaving-forward' : 'is-leaving-backward';
+		const enterClass = direction === 'forward' ? 'is-entering-forward' : 'is-entering-backward';
+
+		isTransitioning = true;
+		form.setAttribute('aria-busy', 'true');
+
+		if (!prefersReducedMotion) {
+			currentPanel.classList.add(leaveClass);
+			await waitForAnimation(currentPanel, 300);
+		}
+
+		currentPanel.classList.remove('active', leaveClass);
+		currentPanel.setAttribute('aria-hidden', 'true');
+		nextPanel.classList.add('active');
+		nextPanel.removeAttribute('aria-hidden');
+		currentStep = step;
+		updateStepIndicator(step);
+
+		if (!prefersReducedMotion) {
+			nextPanel.classList.add(enterClass);
+			await waitForAnimation(nextPanel, 380);
+			nextPanel.classList.remove(enterClass);
+		}
+
+		form.removeAttribute('aria-busy');
+		isTransitioning = false;
+
+		const firstInput = nextPanel.querySelector('input');
+		if (firstInput) {
+			firstInput.focus({ preventScroll: true });
+		}
+	}
+
+	document.querySelectorAll('.signup-step').forEach(function (panel) {
+		if (!panel.classList.contains('active')) {
+			panel.setAttribute('aria-hidden', 'true');
+		}
+	});
 
 	/** 해당 단계의 메시지 영역에 에러를 표시합니다. */
 	function showError(step, text) {
@@ -52,7 +124,7 @@
 
 	document.getElementById('nextButton1').addEventListener('click', async function () {
 		clearError(1);
-		const loginId = document.getElementById('loginId').value.trim();
+		const loginId = document.getElementById('signupLoginId').value.trim();
 
 		if (!loginId) {
 			showError(1, '사번을 입력해 주세요.');
@@ -82,7 +154,7 @@
 
 	document.getElementById('nextButton2').addEventListener('click', async function () {
 		clearError(2);
-		const email = document.getElementById('email').value.trim();
+		const email = document.getElementById('signupEmail').value.trim();
 
 		if (!email) {
 			showError(2, '이메일을 입력해 주세요.');
@@ -112,8 +184,8 @@
 
 	document.getElementById('nextButton3').addEventListener('click', function () {
 		clearError(3);
-		const name = document.getElementById('name').value.trim();
-		const department = document.getElementById('department').value.trim();
+		const name = document.getElementById('signupName').value.trim();
+		const department = document.getElementById('signupDepartment').value.trim();
 
 		if (!name) {
 			showError(3, '이름을 입력해 주세요.');
@@ -132,8 +204,8 @@
 		event.preventDefault();
 		clearError(4);
 
-		const password = document.getElementById('password').value;
-		const passwordConfirm = document.getElementById('passwordConfirm').value;
+		const password = document.getElementById('signupPassword').value;
+		const passwordConfirm = document.getElementById('signupPasswordConfirm').value;
 
 		// 서버(SignupRequest)와 동일한 규칙: 8자 이상, 영문자와 숫자 포함
 		if (!/^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(password)) {
@@ -153,10 +225,10 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					loginId: document.getElementById('loginId').value.trim(),
-					email: document.getElementById('email').value.trim(),
-					name: document.getElementById('name').value.trim(),
-					department: document.getElementById('department').value.trim(),
+					loginId: document.getElementById('signupLoginId').value.trim(),
+					email: document.getElementById('signupEmail').value.trim(),
+					name: document.getElementById('signupName').value.trim(),
+					department: document.getElementById('signupDepartment').value.trim(),
 					password: password
 				})
 			});
