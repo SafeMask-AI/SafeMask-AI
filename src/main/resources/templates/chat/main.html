@@ -74,15 +74,23 @@
 		<section class="message-list" id="messageList" aria-live="polite"></section>
 		<div class="drop-overlay" id="dropOverlay">파일을 놓으면 대화에 첨부됩니다.</div>
 
-		<section class="masking-preview" id="maskingPreview" hidden>
+		<div class="masking-preview-backdrop" id="maskingPreviewBackdrop" hidden></div>
+		<section class="masking-preview" id="maskingPreview" role="dialog" aria-modal="true"
+			aria-labelledby="maskingPreviewTitle" hidden>
 			<div class="preview-header">
-				<div>
-					<p class="preview-title">마스킹 확인</p>
-					<p class="preview-sub" id="previewSummary"></p>
+				<div class="preview-heading">
+					<img class="masking-brand-mark" th:src="@{/images/login-haetae-logo.jpg}" alt="해태">
+					<span class="masking-brand-divider" aria-hidden="true"></span>
+					<span class="preview-heading-icon" aria-hidden="true">&#128274;</span>
+					<div>
+						<p class="preview-title" id="maskingPreviewTitle">마스킹 확인</p>
+						<p class="preview-sub" id="previewSummary"></p>
+					</div>
 				</div>
-				<button type="button" class="preview-close" id="previewCancelButton" title="취소">&times;</button>
+				<button type="button" class="preview-close" id="previewCancelButton" aria-label="마스킹 확인 취소">&times;</button>
 			</div>
 			<div class="preview-detail" id="previewText"></div>
+			<button type="button" class="preview-detail-toggle" id="previewDetailButton" hidden>상세보기</button>
 			<div class="manual-mask">
 				<input type="text" id="manualMaskValue" placeholder="추가로 가릴 단어를 입력하세요">
 				<select id="manualMaskType">
@@ -117,7 +125,7 @@
 			<div class="preview-actions">
 				<button type="button" class="secondary-button" id="previewDownloadButton">미리보기 다운로드</button>
 				<button type="button" class="secondary-button" id="previewEditButton">다시 수정</button>
-				<button type="button" class="primary-button" id="previewApproveButton">이대로 전송</button>
+				<button type="button" class="primary-button" id="previewApproveButton">마스킹하고 전송</button>
 			</div>
 		</section>
 
@@ -125,11 +133,16 @@
 			<div class="masking-detail-backdrop" id="maskingDetailBackdrop"></div>
 			<section class="masking-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="maskingDetailTitle">
 				<div class="masking-detail-header">
-					<div>
-						<p class="masking-detail-title" id="maskingDetailTitle">마스킹 상세보기</p>
-						<p class="masking-detail-sub" id="maskingDetailSummary"></p>
+					<div class="masking-detail-heading">
+						<img class="masking-brand-mark" th:src="@{/images/login-haetae-logo.jpg}" alt="해태">
+						<span class="masking-brand-divider" aria-hidden="true"></span>
+						<span class="masking-detail-icon" aria-hidden="true">&#128274;</span>
+						<div>
+							<p class="masking-detail-title" id="maskingDetailTitle">마스킹 상세보기</p>
+							<p class="masking-detail-sub" id="maskingDetailSummary"></p>
+						</div>
 					</div>
-					<button type="button" class="masking-detail-close" id="maskingDetailCloseButton" title="닫기">&times;</button>
+					<button type="button" class="masking-detail-close" id="maskingDetailCloseButton" aria-label="상세보기 닫기">&times;</button>
 				</div>
 				<div class="masking-detail-body" id="maskingDetailBody"></div>
 			</section>

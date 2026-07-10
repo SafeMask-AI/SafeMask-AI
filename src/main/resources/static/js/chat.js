@@ -31,6 +31,9 @@
 	let attachedFiles = [];
 	let sending = false;
 	let activeRequest = null;
+	let maskingDetailReturnFocus = null;
+	let currentPreviewData = null;
+	let currentPreviewTotalCount = 0;
 
 	const SUPPORTED_FILE_TYPES = {
 		txt: { label: 'TXT', kind: 'text', mark: 'Aa' },
@@ -87,8 +90,10 @@
 	const attachmentList = document.getElementById('attachmentList');
 	const attachmentNotice = document.getElementById('attachmentNotice');
 	const maskingPreview = document.getElementById('maskingPreview');
+	const maskingPreviewBackdrop = document.getElementById('maskingPreviewBackdrop');
 	const previewSummary = document.getElementById('previewSummary');
 	const previewText = document.getElementById('previewText');
+	const previewDetailButton = document.getElementById('previewDetailButton');
 	const previewApproveButton = document.getElementById('previewApproveButton');
 	const previewCancelButton = document.getElementById('previewCancelButton');
 	const previewEditButton = document.getElementById('previewEditButton');
@@ -146,6 +151,8 @@
 	document.addEventListener('keydown', function (event) {
 		if (event.key === 'Escape' && !maskingDetailModal.hidden) {
 			closeMaskingDetailModal();
+		} else if (event.key === 'Escape' && !maskingPreview.hidden) {
+			clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
 		}
 	});
 
@@ -174,6 +181,7 @@
 
 	previewCancelButton.addEventListener('click', function () {
 		clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
+		messageInput.focus({ preventScroll: true });
 	});
 	previewEditButton.addEventListener('click', function () {
 		const content = pendingPreview ? pendingPreview.content : '';
@@ -185,6 +193,11 @@
 		messageInput.focus();
 	});
 	previewDownloadButton.addEventListener('click', downloadMaskingPreview);
+	previewDetailButton.addEventListener('click', function () {
+		if (currentPreviewData) {
+			openMaskingDetailModal(currentPreviewData, currentPreviewTotalCount);
+		}
+	});
 
 	manualMaskAddButton.addEventListener('click', addManualMask);
 	manualMaskValue.addEventListener('keydown', function (event) {
@@ -208,7 +221,7 @@
 		if (!approved) {
 			clearPreviewState({ restoreAttachments: true });
 		} else {
-			maskingPreview.hidden = true;
+			setMaskingPreviewVisible(false);
 			attachmentList.hidden = true;
 		}
 		setSending(true);
@@ -281,7 +294,7 @@
 						resizeComposer();
 					}
 				if (approved && pendingPreview) {
-					maskingPreview.hidden = false;
+					setMaskingPreviewVisible(true);
 					attachmentList.hidden = true;
 				}
 			} else {
@@ -1062,28 +1075,36 @@
 		const totalCount = Object.values(summary).reduce(function (sum, count) {
 			return sum + Number(count || 0);
 		}, 0);
-		const summaryText = Object.entries(summary)
-			.map(function ([type, count]) {
-				const detection = (data.detections || []).find(function (item) {
-					return item.type === type;
-				});
-				return `${getMaskingTypeLabel(type, detection)} ${count}건`;
-			})
-			.join(', ');
-
-		previewSummary.textContent = summaryText
-			? `${summaryText}이 탐지되어 안전한 토큰으로 바뀝니다.`
+		previewSummary.textContent = totalCount > 0
+			? `민감정보 ${totalCount}건이 탐지되어 안전한 토큰으로 바뀝니다.`
 			: '첨부 파일 내용을 확인했습니다. 추가로 가릴 항목이 있으면 지정한 뒤 전송하세요.';
-		renderPreviewDetails(data, totalCount);
+		currentPreviewData = data;
+		currentPreviewTotalCount = totalCount;
+		renderPreviewDetails(data);
 		renderManualMasks();
-		maskingPreview.hidden = false;
+		setMaskingPreviewVisible(true);
 	}
 
-	function renderPreviewDetails(data, totalCount) {
+	function setMaskingPreviewVisible(visible) {
+		maskingPreview.hidden = !visible;
+		maskingPreviewBackdrop.hidden = !visible;
+		updateOverlayScrollLock();
+		if (visible) {
+			previewCancelButton.focus({ preventScroll: true });
+		}
+	}
+
+	function updateOverlayScrollLock() {
+		const overlayOpen = !maskingPreview.hidden || !maskingDetailModal.hidden;
+		document.body.classList.toggle('modal-open', overlayOpen);
+	}
+
+	function renderPreviewDetails(data) {
 		const detections = data.detections || [];
 		previewText.innerHTML = '';
 
 		if (detections.length === 0) {
+			previewDetailButton.hidden = true;
 			const empty = document.createElement('p');
 			empty.className = 'preview-empty';
 			empty.textContent = '자동 탐지된 민감정보는 없습니다. 필요한 경우 아래에서 직접 추가 마스킹할 수 있습니다.';
@@ -1120,15 +1141,7 @@
 			previewText.appendChild(sampleMore);
 		}
 
-		const detailToggle = document.createElement('button');
-		detailToggle.type = 'button';
-		detailToggle.className = 'preview-detail-toggle';
-		detailToggle.textContent = '상세보기';
-		previewText.appendChild(detailToggle);
-
-		detailToggle.addEventListener('click', function () {
-			openMaskingDetailModal(data, totalCount);
-		});
+		previewDetailButton.hidden = false;
 	}
 
 	function createDetectionSample(detection, original) {
@@ -1142,7 +1155,7 @@
 		const flow = document.createElement('span');
 		flow.className = 'preview-sample-flow';
 		const countText = detection.occurrenceCount > 1 ? ` · ${detection.occurrenceCount}건` : '';
-		flow.textContent = `${getDetectionOriginalValue(detection, original)} -> ${formatTokenForDisplay(detection)}${countText}`;
+		flow.textContent = `${getDetectionOriginalValue(detection, original)}  →  ${formatTokenForDisplay(detection)}${countText}`;
 
 		row.append(type, flow);
 		return row;
@@ -1155,7 +1168,18 @@
 		const original = pendingPreview ? pendingPreview.content : '';
 		const displayDetections = aggregateDetections(detections, original);
 		const groups = groupDetections(displayDetections);
-		maskingDetailSummary.textContent = `상세 표시 ${displayDetections.length}개 항목 / 실제 탐지 ${totalCount}건`;
+		maskingDetailReturnFocus = document.activeElement;
+		maskingDetailSummary.textContent = `민감정보 총 ${totalCount}건 · ${displayDetections.length}개 변환 항목`;
+
+		const columns = document.createElement('div');
+		columns.className = 'masking-detail-columns';
+		['번호', '유형', '원문', '마스킹 토큰'].forEach(function (label) {
+			const column = document.createElement('span');
+			column.textContent = label;
+			columns.appendChild(column);
+		});
+		maskingDetailBody.appendChild(columns);
+
 		groups.forEach(function (group, groupIndex) {
 			const section = document.createElement('section');
 			section.className = 'masking-detail-group';
@@ -1175,13 +1199,16 @@
 
 			const count = document.createElement('span');
 			count.className = 'masking-detail-count';
-			count.textContent = groupIndex === 0 ? '접기' : '열기';
+			count.textContent = '열기';
 			header.append(title, count);
 			section.appendChild(header);
 
 			const grid = document.createElement('div');
 			grid.className = 'masking-detail-grid';
-			grid.hidden = groupIndex !== 0;
+			grid.id = `maskingDetailGroup${groupIndex}`;
+			grid.hidden = true;
+			header.setAttribute('aria-controls', grid.id);
+			header.setAttribute('aria-expanded', 'false');
 			group.items.forEach(function (detection, itemIndex) {
 				grid.appendChild(createDetectionRow(detection, original, itemIndex));
 			});
@@ -1190,18 +1217,24 @@
 				const expanded = grid.hidden;
 				grid.hidden = !expanded;
 				count.textContent = expanded ? '접기' : '열기';
+				header.setAttribute('aria-expanded', String(expanded));
 			});
 			maskingDetailBody.appendChild(section);
 		});
 
 		maskingDetailModal.hidden = false;
-		document.body.classList.add('modal-open');
+		updateOverlayScrollLock();
+		maskingDetailCloseButton.focus({ preventScroll: true });
 	}
 
 	function closeMaskingDetailModal() {
 		maskingDetailModal.hidden = true;
 		maskingDetailBody.innerHTML = '';
-		document.body.classList.remove('modal-open');
+		updateOverlayScrollLock();
+		if (maskingDetailReturnFocus && maskingDetailReturnFocus.isConnected) {
+			maskingDetailReturnFocus.focus({ preventScroll: true });
+		}
+		maskingDetailReturnFocus = null;
 	}
 
 	function groupDetections(detections) {
@@ -1261,11 +1294,13 @@
 		const before = document.createElement('span');
 		before.className = 'masking-detail-row-value';
 		before.textContent = getDetectionOriginalValue(detection, original);
+		before.title = before.textContent;
 
 		const after = document.createElement('span');
 		after.className = 'masking-detail-row-token';
 		const countText = detection.occurrenceCount > 1 ? ` · ${detection.occurrenceCount}건` : '';
 		after.textContent = `${formatTokenForDisplay(detection)}${countText}`;
+		after.title = after.textContent;
 
 		row.append(order, type, before, after);
 		return row;
@@ -1380,11 +1415,14 @@
 		if (removePendingUserRow && pendingPreview && pendingPreview.userRow) {
 			removeMessageRow(pendingPreview.userRow);
 		}
-		maskingPreview.hidden = true;
+		setMaskingPreviewVisible(false);
 		previewSummary.textContent = '';
 		previewText.innerHTML = '';
+		previewDetailButton.hidden = true;
 		manualMaskValue.value = '';
 		pendingPreview = null;
+		currentPreviewData = null;
+		currentPreviewTotalCount = 0;
 		manualMasks = [];
 		if (clearAttachments) {
 			attachedFiles = [];
