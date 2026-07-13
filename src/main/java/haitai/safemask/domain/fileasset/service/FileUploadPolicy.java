@@ -2,10 +2,12 @@ package haitai.safemask.domain.fileasset.service;
 
 import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.io.IOException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -21,6 +23,7 @@ public class FileUploadPolicy {
 	private static final int MAX_FILES_PER_REQUEST = 5;
 	private static final long MAX_FILE_BYTES = 10L * 1024 * 1024;
 	private static final Set<String> ALLOWED_EXTENSIONS = Set.of("txt", "csv", "xlsx", "doc", "docx", "pdf");
+	private static final int MAX_SIGNATURE_BYTES = 8;
 
 	public void validate(List<MultipartFile> files) {
 		if (files == null || files.isEmpty()) {
@@ -58,7 +61,7 @@ public class FileUploadPolicy {
 	private void validateSignature(MultipartFile file, String extension) {
 		if (Set.of("txt", "csv").contains(extension)) return;
 		try {
-			byte[] bytes = file.getBytes();
+			byte[] bytes = readSignaturePrefix(file);
 			boolean valid = switch (extension) {
 				case "pdf" -> startsWith(bytes, new byte[]{'%', 'P', 'D', 'F', '-'});
 				case "xlsx", "docx" -> startsWith(bytes, new byte[]{'P', 'K'});
@@ -68,6 +71,13 @@ public class FileUploadPolicy {
 			if (!valid) throw new CustomException(ErrorCode.INVALID_REQUEST, "파일 확장자와 실제 형식이 일치하지 않습니다: " + file.getOriginalFilename());
 		} catch (IOException e) {
 			throw new CustomException(ErrorCode.INVALID_REQUEST, e);
+		}
+	}
+
+	private byte[] readSignaturePrefix(MultipartFile file) throws IOException {
+		try (InputStream inputStream = file.getInputStream()) {
+			byte[] buffer = inputStream.readNBytes(MAX_SIGNATURE_BYTES);
+			return buffer.length == MAX_SIGNATURE_BYTES ? buffer : Arrays.copyOf(buffer, buffer.length);
 		}
 	}
 
