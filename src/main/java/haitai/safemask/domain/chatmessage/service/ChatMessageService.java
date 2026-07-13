@@ -123,6 +123,7 @@ public class ChatMessageService {
 		List<MultipartFile> files) {
 		validateRequest(request);
 		boolean forcePreview = files != null && !files.isEmpty();
+		boolean temporaryChatRoom = request.chatRoomId() == null;
 
 		ChatRoom chatRoom = resolveChatRoom(member, request, displayContent);
 		MaskingResult maskingResult = applyMasking(chatRoom.getId(), request);
@@ -132,7 +133,7 @@ public class ChatMessageService {
 			.toList();
 
 		if ((forcePreview || maskingResult.hasDetections()) && !request.isApproved()) {
-			return ChatSendResponse.preview(chatRoom.getId(), maskingResult.maskedText(),
+			return ChatSendResponse.preview(chatRoom.getId(), temporaryChatRoom, maskingResult.maskedText(),
 				maskingResult.summary(), detections);
 		}
 

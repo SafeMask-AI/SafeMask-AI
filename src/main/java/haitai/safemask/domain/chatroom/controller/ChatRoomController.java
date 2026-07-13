@@ -37,4 +37,11 @@ public class ChatRoomController {
 		chatRoomService.archive(member, chatRoomId);
 		return ResponseEntity.noContent().build();
 	}
+
+	@DeleteMapping("/{chatRoomId}/preview")
+	public ResponseEntity<Void> discardPreview(@AuthenticationPrincipal Member member,
+		@PathVariable Long chatRoomId) {
+		chatRoomService.discardEmptyPreview(member, chatRoomId);
+		return ResponseEntity.noContent().build();
+	}
 }

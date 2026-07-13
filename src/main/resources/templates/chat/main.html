@@ -3,24 +3,33 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>해태 사내 AI</title>
+	<title>SafeMask | 해태 사내 보안 AI</title>
+	<link rel="icon" type="image/jpeg" th:href="@{/images/haitai-logo.jpg}">
 	<link rel="stylesheet" th:href="@{/css/chat.css}">
 </head>
 <body>
 <div class="chat-layout">
 
 	<!-- ==================== 좌측 사이드바 ==================== -->
-	<aside class="sidebar">
+	<aside class="sidebar" id="sidebar" aria-label="채팅 탐색">
 		<div class="sidebar-logo">
-			<img th:src="@{/images/haitai-logo.jpg}" alt="해태 로고">
-			<span class="service-name">해태 사내 <span class="highlight">AI</span></span>
+			<span class="sidebar-brand-mark"><img th:src="@{/images/haitai-logo.jpg}" alt="해태"></span>
+			<span class="sidebar-brand-copy">
+				<small>HAITAI SECURE AI</small>
+				<strong class="service-name">SafeMask</strong>
+			</span>
+			<button type="button" class="mobile-sidebar-close" id="sidebarCloseButton" aria-label="채팅 메뉴 닫기">&times;</button>
 		</div>
-		<p class="sidebar-desc">민감정보를 가려주는 사내 AI</p>
+		<p class="sidebar-desc">보안 걱정 없이 사용하는 해태 사내 AI</p>
 
 		<button type="button" class="new-chat-button">+ 새 채팅</button>
 
 		<p class="recent-label">최근 대화</p>
-		<ul class="recent-list" id="recentList">
+		<label class="room-search">
+			<span class="sr-only">최근 대화 검색</span>
+			<input type="search" id="roomSearchInput" placeholder="대화 검색" autocomplete="off">
+		</label>
+		<ul class="recent-list" id="recentList" aria-label="최근 대화">
 		</ul>
 
 		<!-- 하단 사용자 정보: chat.js가 로그인 시 저장한 값으로 채웁니다. -->
@@ -30,25 +39,43 @@
 				<div class="user-name" id="userName"></div>
 				<div class="user-meta" id="userMeta"></div>
 			</div>
-			<button type="button" class="logout-button" id="logoutButton" title="로그아웃">&#8617;</button>
+			<button type="button" class="logout-button" id="logoutButton" title="로그아웃" aria-label="로그아웃">&#8617;</button>
 		</div>
 	</aside>
+	<div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
 
 	<!-- ==================== 우측 메인 영역 ==================== -->
 	<main class="main">
 
 		<!-- 상단 바 -->
 		<header class="main-header">
-			<span class="title">새 채팅</span>
-			<span class="masking-chip">사내 마스킹 ON</span>
+			<div class="main-header-title">
+				<button type="button" class="sidebar-toggle" id="sidebarToggleButton" aria-controls="sidebar"
+					aria-expanded="false" aria-label="채팅 메뉴 열기">&#9776;</button>
+				<div class="header-copy">
+					<span class="title">새 대화</span>
+					<span class="header-context">평소처럼 편하게 질문하세요</span>
+				</div>
+			</div>
+			<details class="protection-status">
+				<summary>
+					<span class="protection-icon" aria-hidden="true">&#10003;</span>
+					<strong>SafeMask 보호</strong>
+					<span class="protection-chevron" aria-hidden="true">&#9662;</span>
+				</summary>
+				<div class="protection-popover">
+					<strong>원문이 바로 외부 AI로 전송되지 않습니다.</strong>
+					<p>민감정보가 발견되면 마스킹 결과를 먼저 보여드리고, 사용자가 승인한 내용만 전송합니다.</p>
+				</div>
+			</details>
 		</header>
 
 		<!-- 온보딩(대화 시작 전 빈 화면) -->
 		<section class="onboarding" id="onboarding">
 			<img class="center-logo" th:src="@{/images/haitai-logo.jpg}" alt="해태 로고">
 
-			<h1>무엇을 도와드릴까요?</h1>
-			<p class="sub">민감정보가 포함된 자료도 괜찮아요. 전송 전에 자동으로 가려드립니다.</p>
+			<h1>평소처럼 편하게 물어보세요</h1>
+			<p class="sub">일반 ChatGPT를 쓰듯 자유롭게 대화하세요. 민감정보 보호는 SafeMask가 전송 전에 알아서 챙깁니다.</p>
 
 			<!-- 동작 방식 3단계 -->
 			<div class="feature-cards">
@@ -69,9 +96,16 @@
 				</div>
 			</div>
 
+			<button type="button" class="usage-guide-button" id="usageGuideButton">
+				<span class="usage-guide-icon" aria-hidden="true">?</span>
+				<span><strong>SafeMask는 어떻게 사용하나요?</strong><small>평소처럼 대화하면서 보안이 적용되는 과정을 확인해 보세요</small></span>
+				<span aria-hidden="true">&#8594;</span>
+			</button>
+
 		</section>
 
 		<section class="message-list" id="messageList" aria-live="polite"></section>
+		<button type="button" class="scroll-latest-button" id="scrollLatestButton" hidden>최신 메시지로 이동 &#8595;</button>
 		<div class="drop-overlay" id="dropOverlay">파일을 놓으면 대화에 첨부됩니다.</div>
 
 		<div class="masking-preview-backdrop" id="maskingPreviewBackdrop" hidden></div>
@@ -90,6 +124,7 @@
 				<button type="button" class="preview-close" id="previewCancelButton" aria-label="마스킹 확인 취소">&times;</button>
 			</div>
 			<div class="preview-detail" id="previewText"></div>
+			<p class="preview-feedback" id="previewFeedback" role="alert" hidden></p>
 			<button type="button" class="preview-detail-toggle" id="previewDetailButton" hidden>상세보기</button>
 			<div class="manual-mask">
 				<input type="text" id="manualMaskValue" placeholder="추가로 가릴 단어를 입력하세요">
@@ -148,15 +183,78 @@
 			</section>
 		</div>
 
+		<div class="usage-guide-modal" id="usageGuideModal" hidden>
+			<div class="usage-guide-backdrop" id="usageGuideBackdrop"></div>
+			<section class="usage-guide-dialog" role="dialog" aria-modal="true" aria-labelledby="usageGuideTitle">
+				<header class="usage-guide-header">
+					<div>
+						<p class="usage-guide-eyebrow">SafeMask 이용 안내</p>
+						<h2 id="usageGuideTitle">어떻게 사용하나요?</h2>
+					</div>
+					<button type="button" class="usage-guide-close" id="usageGuideCloseButton" aria-label="이용 안내 닫기">&times;</button>
+				</header>
+				<div class="usage-guide-body">
+					<div class="usage-guide-tabs" role="tablist" aria-label="SafeMask 이용 안내 항목">
+						<button type="button" role="tab" id="usageStepsTab" aria-controls="usageStepsPanel" aria-selected="true">사용 방법</button>
+						<button type="button" role="tab" id="usageBenefitsTab" aria-controls="usageBenefitsPanel" aria-selected="false">업무 효율</button>
+					</div>
+					<div class="usage-guide-panel" id="usageStepsPanel" role="tabpanel" aria-labelledby="usageStepsTab">
+						<p class="usage-guide-intro"><strong>사용 방법은 평소 ChatGPT와 같습니다.</strong> 궁금한 내용을 자유롭게 묻고, 필요하면 파일을 첨부하세요. SafeMask가 뒤에서 민감정보를 확인하고 외부로 나가는 원문을 보호합니다.</p>
+						<ol class="usage-steps">
+							<li><span>1</span><div><strong>하고 싶은 말을 그대로 입력하세요</strong><p>일상적인 질문, 아이디어, 글쓰기, 요약, 번역, 코드와 업무 자료 등 주제를 정해두지 않고 자유롭게 대화할 수 있습니다.</p></div></li>
+							<li><span>2</span><div><strong>마스킹 내용을 확인하세요</strong><p>개인정보와 회사 민감정보가 발견되면 원문은 외부로 보내지 않고, 마스킹 결과를 먼저 보여줍니다.</p></div></li>
+							<li><span>3</span><div><strong>필요하면 직접 추가로 가리세요</strong><p>자동 탐지 결과를 상세히 보고, 더 가리고 싶은 단어나 값을 직접 추가할 수 있습니다.</p></div></li>
+							<li><span>4</span><div><strong>승인한 뒤 답변을 받으세요</strong><p>승인된 마스킹본만 AI에 전달되며, 답변과 생성 파일은 사내 화면에서 원래 문맥으로 복원됩니다.</p></div></li>
+						</ol>
+					</div>
+					<div class="usage-guide-panel usage-guide-note" id="usageBenefitsPanel" role="tabpanel" aria-labelledby="usageBenefitsTab" hidden>
+						<div class="usage-benefit-heading">
+							<strong>AI를 쓸 수 있는 업무 범위가 넓어져요</strong>
+							<p>자료 검토뿐 아니라 업무의 시작, 판단, 결과물 제작까지 평소 ChatGPT처럼 이어갈 수 있습니다.</p>
+						</div>
+						<ul class="usage-benefits">
+							<li><span class="usage-benefit-index">1</span><div><strong>막막한 업무의 시작을 빠르게</strong><span>아이디어 정리, 보고서·메일 초안, 번역, SQL·코드 질문처럼 파일이 없는 일도 바로 시작할 수 있습니다.</span></div></li>
+							<li><span class="usage-benefit-index">2</span><div><strong>실제 업무 맥락으로 더 정확하게</strong><span>민감한 이름이나 수치를 임의로 바꾸거나 중요한 내용을 빼지 않아도 되어 더 구체적으로 질문할 수 있습니다.</span></div></li>
+							<li><span class="usage-benefit-index">3</span><div><strong>답변에서 실제 결과물까지</strong><span>설명만 받는 데서 끝나지 않고 지원 범위의 Excel·Word·PDF 수정과 새 파일 생성으로 이어갈 수 있습니다.</span></div></li>
+							<li><span class="usage-benefit-index">4</span><div><strong>보안 걱정 없이 AI를 업무 습관으로</strong><span>원문 대신 마스킹본만 외부 AI에 전달하고 최종 전송은 사용자가 결정하므로, 민감한 업무에서도 AI를 일상적으로 활용할 수 있습니다.</span></div></li>
+						</ul>
+					</div>
+				</div>
+			</section>
+		</div>
+
+		<div class="confirm-modal" id="confirmModal" hidden>
+			<div class="confirm-backdrop"></div>
+			<section class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle"
+				aria-describedby="confirmDescription">
+				<div class="confirm-brand">
+					<img th:src="@{/images/login-haetae-logo.jpg}" alt="해태">
+					<span class="confirm-brand-divider" aria-hidden="true"></span>
+					<span class="confirm-brand-name">SafeMask</span>
+				</div>
+				<div class="confirm-heading">
+					<span class="confirm-warning-icon" aria-hidden="true">!</span>
+					<div>
+						<h2 id="confirmTitle">대화를 삭제할까요?</h2>
+						<p id="confirmDescription">목록에서 삭제한 대화와 첨부파일은 다시 확인할 수 없습니다.</p>
+					</div>
+				</div>
+				<div class="confirm-actions">
+					<button type="button" class="secondary-button" id="confirmCancelButton">취소</button>
+					<button type="button" class="danger-button" id="confirmApproveButton">대화 삭제</button>
+				</div>
+			</section>
+		</div>
+
 		<footer class="composer">
 			<ul class="attachment-list" id="attachmentList" hidden></ul>
 			<div class="attachment-notice" id="attachmentNotice" hidden></div>
 			<div class="composer-box">
-				<button type="button" class="attach-button" id="attachButton" title="파일 첨부">&#128206;</button>
+				<button type="button" class="attach-button" id="attachButton" title="파일 첨부" aria-label="파일 첨부">&#128206;</button>
 				<input type="file" id="fileInput" multiple hidden
 					   accept=".txt,.csv,.xlsx,.doc,.docx,.pdf,application/msword,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/csv">
 				<textarea id="messageInput" rows="1" placeholder="메시지를 입력하거나 민감정보가 포함된 자료를 붙여넣으세요..."></textarea>
-				<button type="button" class="send-button" id="sendButton" title="전송">&#8593;</button>
+				<button type="button" class="send-button" id="sendButton" title="전송" aria-label="메시지 전송">&#8593;</button>
 			</div>
 			<div class="composer-hint">
 				<span class="safe-note">전송 전 민감정보를 자동 검사하고, 마스킹 결과를 확인·승인하면 전송됩니다.</span>

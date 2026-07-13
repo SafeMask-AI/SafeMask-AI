@@ -31,20 +31,28 @@
 	let attachedFiles = [];
 	let sending = false;
 	let activeRequest = null;
+	let activeHistoryRequest = null;
+	let refreshPromise = null;
+	let navigationVersion = 0;
+	let temporaryPreviewRoomId = null;
+	let autoFollowMessages = true;
+	let confirmResolver = null;
+	let confirmReturnFocus = null;
+	let usageGuideReturnFocus = null;
 	let maskingDetailReturnFocus = null;
 	let currentPreviewData = null;
 	let currentPreviewTotalCount = 0;
 
 	const SUPPORTED_FILE_TYPES = {
 		txt: { label: 'TXT', kind: 'text', mark: 'Aa' },
-		md: { label: 'MD', kind: 'text', mark: 'Md' },
 		csv: { label: 'CSV', kind: 'csv', mark: '1,2' },
-		xls: { label: 'XLS', kind: 'excel', mark: '▦' },
 		xlsx: { label: 'XLSX', kind: 'excel', mark: '▦' },
 		doc: { label: 'DOC', kind: 'word', mark: 'W' },
 		docx: { label: 'DOC', kind: 'word', mark: '¶' },
 		pdf: { label: 'PDF', kind: 'pdf', mark: 'PDF' }
 	};
+	const MAX_FILES_PER_REQUEST = 5;
+	const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 	const MASKING_TYPE_LABELS = {
 		NAME: '이름',
@@ -109,9 +117,30 @@
 	const maskingDetailBody = document.getElementById('maskingDetailBody');
 	const newChatButton = document.querySelector('.new-chat-button');
 	const recentList = document.getElementById('recentList');
+	const roomSearchInput = document.getElementById('roomSearchInput');
 	const dropOverlay = document.getElementById('dropOverlay');
+	const previewFeedback = document.getElementById('previewFeedback');
+	const sidebar = document.getElementById('sidebar');
+	const sidebarToggleButton = document.getElementById('sidebarToggleButton');
+	const sidebarCloseButton = document.getElementById('sidebarCloseButton');
+	const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+	const scrollLatestButton = document.getElementById('scrollLatestButton');
+	const confirmModal = document.getElementById('confirmModal');
+	const confirmCancelButton = document.getElementById('confirmCancelButton');
+	const confirmApproveButton = document.getElementById('confirmApproveButton');
+	const usageGuideButton = document.getElementById('usageGuideButton');
+	const usageGuideModal = document.getElementById('usageGuideModal');
+	const usageGuideBackdrop = document.getElementById('usageGuideBackdrop');
+	const usageGuideCloseButton = document.getElementById('usageGuideCloseButton');
+	const usageStepsTab = document.getElementById('usageStepsTab');
+	const usageBenefitsTab = document.getElementById('usageBenefitsTab');
+	const usageStepsPanel = document.getElementById('usageStepsPanel');
+	const usageBenefitsPanel = document.getElementById('usageBenefitsPanel');
+	const headerTitle = document.querySelector('.main-header .title');
+	const headerContext = document.querySelector('.header-context');
+	const protectionStatus = document.querySelector('.protection-status');
 
-	renderRooms([]);
+	renderRoomState('loading');
 	loadRooms();
 
 	sendButton.addEventListener('click', function () {
@@ -130,6 +159,14 @@
 	});
 
 	messageInput.addEventListener('input', resizeComposer);
+	messageList.addEventListener('scroll', function () {
+		autoFollowMessages = isMessageListNearBottom();
+		scrollLatestButton.hidden = autoFollowMessages;
+	});
+	scrollLatestButton.addEventListener('click', function () {
+		autoFollowMessages = true;
+		scrollMessageListToBottom(true);
+	});
 	attachButton.addEventListener('click', function () {
 		fileInput.click();
 	});
@@ -149,10 +186,23 @@
 		}
 	}, { passive: false });
 	document.addEventListener('keydown', function (event) {
-		if (event.key === 'Escape' && !maskingDetailModal.hidden) {
+		if (event.key === 'Tab') {
+			trapFocusInOpenDialog(event);
+		} else if (event.key === 'Escape' && !confirmModal.hidden) {
+			closeConfirmDialog(false);
+		} else if (event.key === 'Escape' && !maskingDetailModal.hidden) {
 			closeMaskingDetailModal();
+		} else if (event.key === 'Escape' && !usageGuideModal.hidden) {
+			closeUsageGuide();
 		} else if (event.key === 'Escape' && !maskingPreview.hidden) {
-			clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
+			cancelMaskingPreview();
+		} else if (event.key === 'Escape' && sidebar.classList.contains('open')) {
+			closeSidebar();
+		}
+	});
+	document.addEventListener('click', function (event) {
+		if (protectionStatus.open && !protectionStatus.contains(event.target)) {
+			protectionStatus.open = false;
 		}
 	});
 
@@ -180,8 +230,7 @@
 	});
 
 	previewCancelButton.addEventListener('click', function () {
-		clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
-		messageInput.focus({ preventScroll: true });
+		cancelMaskingPreview();
 	});
 	previewEditButton.addEventListener('click', function () {
 		const content = pendingPreview ? pendingPreview.content : '';
@@ -209,6 +258,35 @@
 
 	newChatButton.addEventListener('click', function () {
 		resetToNewChat();
+		closeSidebar();
+	});
+	roomSearchInput.addEventListener('input', function () {
+		renderRooms(rooms);
+	});
+
+	sidebarToggleButton.addEventListener('click', openSidebar);
+	sidebarCloseButton.addEventListener('click', closeSidebar);
+	sidebarBackdrop.addEventListener('click', closeSidebar);
+	confirmCancelButton.addEventListener('click', function () { closeConfirmDialog(false); });
+	confirmApproveButton.addEventListener('click', function () { closeConfirmDialog(true); });
+	confirmModal.querySelector('.confirm-backdrop').addEventListener('click', function () {
+		closeConfirmDialog(false);
+	});
+	usageGuideButton.addEventListener('click', openUsageGuide);
+	usageGuideCloseButton.addEventListener('click', closeUsageGuide);
+	usageGuideBackdrop.addEventListener('click', closeUsageGuide);
+	usageStepsTab.addEventListener('click', function () { selectUsageGuideTab('steps'); });
+	usageBenefitsTab.addEventListener('click', function () { selectUsageGuideTab('benefits'); });
+	[usageStepsTab, usageBenefitsTab].forEach(function (tab) {
+		tab.addEventListener('keydown', function (event) {
+			if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+				return;
+			}
+			event.preventDefault();
+			const next = tab === usageStepsTab ? usageBenefitsTab : usageStepsTab;
+			selectUsageGuideTab(next === usageStepsTab ? 'steps' : 'benefits');
+			next.focus();
+		});
 	});
 
 	async function sendMessage(approved) {
@@ -222,12 +300,14 @@
 			clearPreviewState({ restoreAttachments: true });
 		} else {
 			setMaskingPreviewVisible(false);
+			setPreviewFeedback('');
 			attachmentList.hidden = true;
 		}
 		setSending(true);
 		const requestState = {
 			controller: new AbortController(),
-			cancelled: false
+			cancelled: false,
+			navigationVersion: navigationVersion
 		};
 		activeRequest = requestState;
 
@@ -247,6 +327,9 @@
 
 		try {
 			const response = await sendChatRequest(content, approved, requestState.controller.signal);
+			if (requestState.navigationVersion !== navigationVersion) {
+				return;
+			}
 
 			if (response.status === 401) {
 				forceLogout();
@@ -268,8 +351,12 @@
 				pendingPreview = {
 					content: content,
 					hasFiles: attachedFiles.length > 0,
-					userRow: optimisticUserRow
+					userRow: optimisticUserRow,
+					temporaryChatRoom: Boolean(data.temporaryChatRoom)
 				};
+				if (data.temporaryChatRoom) {
+					temporaryPreviewRoomId = data.chatRoomId;
+				}
 				manualMasks = [];
 				showPreview(data);
 				attachmentList.hidden = true;
@@ -281,12 +368,16 @@
 				return requestState.cancelled;
 			});
 			pendingPreview = null;
+			temporaryPreviewRoomId = null;
 			manualMasks = [];
 			attachedFiles = [];
 			renderAttachments();
 		} catch (error) {
 			stopStatusTicker(statusTicker);
 			removeMessageRow(statusRow);
+			if (requestState.navigationVersion !== navigationVersion) {
+				return;
+			}
 			if (error.name === 'AbortError') {
 					if (optimisticUserRow && !approved) {
 						removeMessageRow(optimisticUserRow);
@@ -297,14 +388,23 @@
 					setMaskingPreviewVisible(true);
 					attachmentList.hidden = true;
 				}
+			} else if (approved && pendingPreview) {
+				setMaskingPreviewVisible(true);
+				setPreviewFeedback(`${resolveRequestErrorMessage(error)} 내용을 유지했으니 다시 전송할 수 있습니다.`);
 			} else {
+				if (optimisticUserRow && !approved) {
+					removeMessageRow(optimisticUserRow);
+					messageInput.value = content;
+					resizeComposer();
+					renderAttachments();
+				}
 				appendMessage('system', resolveRequestErrorMessage(error));
 			}
 		} finally {
 			if (activeRequest === requestState) {
 				activeRequest = null;
+				setSending(false);
 			}
-			setSending(false);
 		}
 	}
 
@@ -317,16 +417,8 @@
 		const row = document.createElement('div');
 		row.className = `message-row ${role}`;
 
-		const avatar = document.createElement('div');
-		avatar.className = 'message-avatar';
-		avatar.textContent = role === 'user' ? name.charAt(0) : role === 'system' ? '!' : 'AI';
-
 		const body = document.createElement('div');
 		body.className = 'message-body';
-
-		const author = document.createElement('div');
-		author.className = 'message-author';
-		author.textContent = role === 'user' ? name : role === 'system' ? '알림' : '해태 사내 AI';
 
 		const bubble = document.createElement('div');
 		bubble.className = 'message-bubble';
@@ -337,7 +429,6 @@
 			bubble.textContent = text;
 		}
 
-		body.appendChild(author);
 		if (text && text.trim()) {
 			body.appendChild(bubble);
 		}
@@ -350,11 +441,10 @@
 			attachGeneratedFileCards(body, text);
 			attachAssistantActions(row, body, text);
 		}
-		row.appendChild(avatar);
 		row.appendChild(body);
 		messageList.appendChild(row);
 		updateRegenerateVisibility();
-		messageList.scrollTop = messageList.scrollHeight;
+		scrollMessageListToBottom();
 		return row;
 	}
 
@@ -364,28 +454,18 @@
 		const row = document.createElement('div');
 		row.className = 'message-row assistant status';
 
-		const avatar = document.createElement('div');
-		avatar.className = 'message-avatar';
-		avatar.textContent = 'AI';
-
 		const body = document.createElement('div');
 		body.className = 'message-body';
-
-		const author = document.createElement('div');
-		author.className = 'message-author';
-		author.textContent = '해태 사내 AI';
 
 		const bubble = document.createElement('div');
 		bubble.className = 'message-bubble status-bubble';
 		bubble.innerHTML = `<span class="typing-dots"><span></span><span></span><span></span></span><span class="status-text"></span>`;
 		bubble.querySelector('.status-text').textContent = text;
 
-		body.appendChild(author);
 		body.appendChild(bubble);
-		row.appendChild(avatar);
 		row.appendChild(body);
 		messageList.appendChild(row);
-		messageList.scrollTop = messageList.scrollHeight;
+		scrollMessageListToBottom();
 		return row;
 	}
 
@@ -512,22 +592,12 @@
 		const row = document.createElement('div');
 		row.className = `message-row ${role}`;
 
-		const avatar = document.createElement('div');
-		avatar.className = 'message-avatar';
-		avatar.textContent = role === 'user' ? name.charAt(0) : 'AI';
-
 		const body = document.createElement('div');
 		body.className = 'message-body';
 
-		const author = document.createElement('div');
-		author.className = 'message-author';
-		author.textContent = role === 'user' ? name : '해태 사내 AI';
-
 		const bubble = document.createElement('div');
 		bubble.className = 'message-bubble';
-		body.appendChild(author);
 		body.appendChild(bubble);
-		row.appendChild(avatar);
 		row.appendChild(body);
 		messageList.appendChild(row);
 
@@ -539,7 +609,7 @@
 			attachAssistantActions(row, body, text);
 			updateRegenerateVisibility();
 		}
-		messageList.scrollTop = messageList.scrollHeight;
+		scrollMessageListToBottom();
 	}
 
 	async function replaceStatusWithTypingMessage(row, text, shouldCancel) {
@@ -565,12 +635,17 @@
 		attachGeneratedFileCards(body, text);
 		attachAssistantActions(row, body, text);
 		updateRegenerateVisibility();
-		messageList.scrollTop = messageList.scrollHeight;
+		scrollMessageListToBottom();
 	}
 
 	async function typeTextIntoBubble(bubble, text, shouldCancel) {
-		// 2글자마다 짧게 쉬어 글자가 뭉텅이로 붙지 않는 고른 리듬을 만든다
-		const baseDelay = text.length > 900 ? 4 : text.length > 450 ? 8 : 14;
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			bubble.textContent = text;
+			return;
+		}
+		// 한 글자씩 일정하게 보여 짧은 답변도 몰아치지 않게 하고, 긴 답변은 대기 시간이
+		// 과도해지지 않도록 길이에 따라 지연을 단계적으로 줄인다.
+		const baseDelay = text.length > 2400 ? 7 : text.length > 1200 ? 11 : text.length > 600 ? 16 : 22;
 		bubble.classList.add('markdown');
 
 		// 떨림(렉) 방지 구조: 매 글자마다 전체를 다시 렌더링하면 표·코드블록 DOM이
@@ -601,13 +676,11 @@
 			}
 
 			const punctuationPause = /[.!?。！？\n]/.test(char);
-			if (punctuationPause || i % 2 === 0) {
-				// 스크롤 강제 계산도 떨림 원인이라 문장 경계에서만 내린다
-				if (punctuationPause) {
-					messageList.scrollTop = messageList.scrollHeight;
-				}
-				await sleep(punctuationPause ? baseDelay * 5 : baseDelay);
+			// 사용자가 위로 스크롤해 읽고 있으면 위치를 빼앗지 않는다.
+			if (punctuationPause) {
+				scrollMessageListToBottom();
 			}
+			await sleep(punctuationPause ? baseDelay * 5 : baseDelay);
 		}
 	}
 
@@ -615,6 +688,19 @@
 		return new Promise(function (resolve) {
 			window.setTimeout(resolve, ms);
 		});
+	}
+
+	function isMessageListNearBottom() {
+		return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 96;
+	}
+
+	function scrollMessageListToBottom(force) {
+		if (!force && !autoFollowMessages) {
+			scrollLatestButton.hidden = false;
+			return;
+		}
+		messageList.scrollTop = messageList.scrollHeight;
+		scrollLatestButton.hidden = true;
 	}
 
 	// ==== AI 답변 마크다운 렌더링 ====
@@ -917,15 +1003,15 @@
 			// 그 아래에 오류 안내를 붙인다
 			messageList.appendChild(row);
 			updateRegenerateVisibility();
-			messageList.scrollTop = messageList.scrollHeight;
+			scrollMessageListToBottom();
 			if (error.name !== 'AbortError') {
 				appendMessage('system', resolveRequestErrorMessage(error));
 			}
 		} finally {
 			if (activeRequest === requestState) {
 				activeRequest = null;
+				setSending(false);
 			}
-			setSending(false);
 		}
 	}
 
@@ -1080,6 +1166,7 @@
 			: '첨부 파일 내용을 확인했습니다. 추가로 가릴 항목이 있으면 지정한 뒤 전송하세요.';
 		currentPreviewData = data;
 		currentPreviewTotalCount = totalCount;
+		setPreviewFeedback('');
 		renderPreviewDetails(data);
 		renderManualMasks();
 		setMaskingPreviewVisible(true);
@@ -1095,8 +1182,14 @@
 	}
 
 	function updateOverlayScrollLock() {
-		const overlayOpen = !maskingPreview.hidden || !maskingDetailModal.hidden;
+		const overlayOpen = !maskingPreview.hidden || !maskingDetailModal.hidden
+			|| !usageGuideModal.hidden || !confirmModal.hidden;
 		document.body.classList.toggle('modal-open', overlayOpen);
+	}
+
+	function setPreviewFeedback(message) {
+		previewFeedback.textContent = message || '';
+		previewFeedback.hidden = !message;
 	}
 
 	function renderPreviewDetails(data) {
@@ -1419,6 +1512,7 @@
 		previewSummary.textContent = '';
 		previewText.innerHTML = '';
 		previewDetailButton.hidden = true;
+		setPreviewFeedback('');
 		manualMaskValue.value = '';
 		pendingPreview = null;
 		currentPreviewData = null;
@@ -1430,6 +1524,22 @@
 		attachmentList.hidden = !restoreAttachments || attachedFiles.length === 0;
 		renderManualMasks();
 		renderAttachments();
+	}
+
+	async function cancelMaskingPreview() {
+		const shouldReturnToInitial = temporaryPreviewRoomId !== null;
+		const roomIdToDiscard = temporaryPreviewRoomId;
+		clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
+		if (shouldReturnToInitial) {
+			temporaryPreviewRoomId = null;
+			currentChatRoomId = null;
+			messageList.innerHTML = '';
+			updateHeader('새 대화', '평소처럼 편하게 질문하세요');
+			setChatting(false);
+			renderRooms(rooms);
+			await discardPreviewRoom(roomIdToDiscard);
+		}
+		messageInput.focus({ preventScroll: true });
 	}
 
 	function sendChatRequest(content, approved, signal) {
@@ -1468,15 +1578,27 @@
 	}
 
 	function addFiles(files) {
-		// 서버의 AttachmentTextExtractor가 처리할 수 있는 확장자와 맞춥니다.
-		// Word 파일은 구형 .doc와 최신 .docx를 모두 허용하며, 업로드 후 서버에서 본문을 추출해
-		// 일반 채팅 입력과 동일한 마스킹 미리보기/승인 흐름을 거칩니다.
-		const allowed = ['txt', 'csv', 'xlsx', 'doc', 'docx', 'pdf'];
 		const rejected = [];
 		files.forEach(function (file) {
 			const type = getFileType(file.name);
 			if (!type) {
-				rejected.push(file.name);
+				rejected.push(`${file.name} (지원하지 않는 형식)`);
+				return;
+			}
+			if (file.size > MAX_FILE_BYTES) {
+				rejected.push(`${file.name} (10MB 초과)`);
+				return;
+			}
+			if (attachedFiles.length >= MAX_FILES_PER_REQUEST) {
+				rejected.push(`${file.name} (최대 5개)`);
+				return;
+			}
+			const duplicate = attachedFiles.some(function (attached) {
+				return attached.name === file.name && attached.size === file.size
+					&& attached.lastModified === file.lastModified;
+			});
+			if (duplicate) {
+				rejected.push(`${file.name} (이미 첨부됨)`);
 				return;
 			}
 			attachedFiles.push(file);
@@ -1485,7 +1607,7 @@
 		if (rejected.length > 0) {
 			const names = rejected.slice(0, 2).join(', ');
 			const suffix = rejected.length > 2 ? ` 외 ${rejected.length - 2}개` : '';
-			showAttachmentNotice(`${names}${suffix} 파일은 첨부할 수 없습니다.`, 'error');
+			showAttachmentNotice(`${names}${suffix} 파일을 첨부하지 못했습니다.`, 'error');
 		} else if (files.length > 0) {
 			hideAttachmentNotice();
 		}
@@ -1521,6 +1643,7 @@
 				removeButton.className = 'file-remove-button';
 				removeButton.textContent = '×';
 				removeButton.title = '첨부 제거';
+				removeButton.setAttribute('aria-label', `${fileName} 첨부 제거`);
 				removeButton.addEventListener('click', function () {
 					options.onRemove(index);
 				});
@@ -1657,34 +1780,74 @@
 
 	function updateRoomTitle(content) {
 		const title = content.length > 24 ? `${content.slice(0, 24)}...` : content;
-		document.querySelector('.main-header .title').textContent = title;
+		updateHeader(title, 'SafeMask로 보호되는 대화');
+	}
+
+	function updateHeader(title, context) {
+		headerTitle.textContent = title;
+		headerContext.textContent = context;
 	}
 
 	async function loadRooms() {
 		try {
 			const response = await authorizedFetch('/api/chat/rooms');
 			if (!response.ok) {
-				return;
+				throw new Error('최근 대화를 불러오지 못했습니다.');
 			}
 			rooms = await response.json();
 			renderRooms(rooms);
 		} catch (e) {
-			renderRooms([]);
+			renderRoomState('error');
 		}
+	}
+
+	function renderRoomState(state) {
+		recentList.innerHTML = '';
+		const item = document.createElement('li');
+		item.className = 'empty';
+		if (state === 'loading') {
+			item.textContent = '최근 대화를 불러오는 중...';
+		} else {
+			const retry = document.createElement('button');
+			retry.type = 'button';
+			retry.className = 'room-retry';
+			retry.textContent = '목록을 불러오지 못했습니다. 다시 시도';
+			retry.addEventListener('click', function () {
+				renderRoomState('loading');
+				loadRooms();
+			});
+			item.appendChild(retry);
+		}
+		recentList.appendChild(item);
 	}
 
 	function renderRooms(roomList) {
 		recentList.innerHTML = '';
+		const query = roomSearchInput.value.trim().toLocaleLowerCase('ko-KR');
+		const filteredRooms = (roomList || []).filter(function (room) {
+			return !query || (room.title || '새 채팅').toLocaleLowerCase('ko-KR').includes(query);
+		});
 		if (!roomList || roomList.length === 0) {
-			recentList.innerHTML = '<li class="empty">대화를 시작하면 여기에 표시됩니다.</li>';
+			const empty = document.createElement('li');
+			empty.className = 'empty';
+			empty.textContent = '대화를 시작하면 여기에 표시됩니다.';
+			recentList.appendChild(empty);
+			return;
+		}
+		if (filteredRooms.length === 0) {
+			const empty = document.createElement('li');
+			empty.className = 'empty';
+			empty.textContent = '검색 결과가 없습니다.';
+			recentList.appendChild(empty);
 			return;
 		}
 
-		roomList.forEach(function (room) {
+		filteredRooms.forEach(function (room) {
 			const item = document.createElement('li');
 			item.classList.toggle('active', room.id === currentChatRoomId);
 
-			const title = document.createElement('span');
+			const title = document.createElement('button');
+			title.type = 'button';
 			title.className = 'room-title';
 			title.textContent = room.title || '새 채팅';
 			title.addEventListener('click', function () {
@@ -1695,6 +1858,7 @@
 			deleteButton.type = 'button';
 			deleteButton.className = 'room-delete';
 			deleteButton.title = '대화 삭제';
+			deleteButton.setAttribute('aria-label', `${room.title || '새 채팅'} 대화 삭제`);
 			deleteButton.textContent = '×';
 			deleteButton.addEventListener('click', function (event) {
 				event.stopPropagation();
@@ -1708,7 +1872,8 @@
 	}
 
 	async function archiveRoom(chatRoomId) {
-		if (!window.confirm('이 대화를 목록에서 삭제할까요?')) {
+		closeSidebar();
+		if (!await openConfirmDialog()) {
 			return;
 		}
 
@@ -1732,17 +1897,29 @@
 		if (sending) {
 			return;
 		}
+		if (activeHistoryRequest) {
+			activeHistoryRequest.abort();
+		}
+		const historyRequest = new AbortController();
+		activeHistoryRequest = historyRequest;
 		clearPreviewState({ clearAttachments: true });
 		hideAttachmentNotice();
+		closeSidebar();
+		autoFollowMessages = true;
 		currentChatRoomId = chatRoomId;
-		document.querySelector('.main-header .title').textContent = title;
+		updateHeader(title, 'SafeMask로 보호되는 대화');
 		renderRooms(rooms);
 		messageList.innerHTML = '';
 		setChatting(true);
 		const statusRow = appendStatusMessage('이전 대화를 불러오고 있습니다...');
 
 		try {
-			const response = await authorizedFetch(`/api/chat/rooms/${chatRoomId}/messages`);
+			const response = await authorizedFetch(`/api/chat/rooms/${chatRoomId}/messages`, {
+				signal: historyRequest.signal
+			});
+			if (activeHistoryRequest !== historyRequest || currentChatRoomId !== chatRoomId) {
+				return;
+			}
 			if (!response.ok) {
 				throw new Error('대화를 불러오지 못했습니다.');
 			}
@@ -1756,8 +1933,15 @@
 				setChatting(false);
 			}
 		} catch (error) {
+			if (error.name === 'AbortError') {
+				return;
+			}
 			removeMessageRow(statusRow);
 			appendMessage('system', error.message || '대화를 불러오지 못했습니다.');
+		} finally {
+			if (activeHistoryRequest === historyRequest) {
+				activeHistoryRequest = null;
+			}
 		}
 	}
 
@@ -1782,6 +1966,7 @@
 			const removeButton = document.createElement('button');
 			removeButton.type = 'button';
 			removeButton.textContent = '×';
+			removeButton.setAttribute('aria-label', `${mask.value} 수동 마스킹 제거`);
 			removeButton.addEventListener('click', function () {
 				manualMasks.splice(index, 1);
 				renderManualMasks();
@@ -1792,20 +1977,30 @@
 	}
 
 	async function refreshAccessToken() {
-		const response = await fetch('/api/auth/refresh', {
-			method: 'POST',
-			headers: { 'X-Remember-Login': String(rememberLoginEnabled()) }
-		});
-		if (!response.ok) {
-			return false;
+		if (refreshPromise) {
+			return refreshPromise;
 		}
-		const data = await response.json();
-		if (!data.accessToken) {
-			return false;
+		refreshPromise = (async function () {
+			const response = await fetch('/api/auth/refresh', {
+				method: 'POST',
+				headers: { 'X-Remember-Login': String(rememberLoginEnabled()) }
+			});
+			if (!response.ok) {
+				return false;
+			}
+			const data = await response.json();
+			if (!data.accessToken) {
+				return false;
+			}
+			accessToken = data.accessToken;
+			writeAuthValue('accessToken', data.accessToken);
+			return true;
+		})();
+		try {
+			return await refreshPromise;
+		} finally {
+			refreshPromise = null;
 		}
-		accessToken = data.accessToken;
-		writeAuthValue('accessToken', data.accessToken);
-		return true;
 	}
 
 	async function authorizedFetch(url, options) {
@@ -1852,18 +2047,33 @@
 	}
 
 	function resetToNewChat() {
+		navigationVersion += 1;
+		if (activeRequest) {
+			activeRequest.cancelled = true;
+			activeRequest.controller.abort();
+			activeRequest = null;
+		}
+		if (activeHistoryRequest) {
+			activeHistoryRequest.abort();
+			activeHistoryRequest = null;
+		}
+		const roomIdToDiscard = temporaryPreviewRoomId;
+		clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
 		currentChatRoomId = null;
-		pendingPreview = null;
-		manualMasks = [];
-		attachedFiles = [];
+		temporaryPreviewRoomId = null;
+		autoFollowMessages = true;
 		messageList.innerHTML = '';
 		setChatting(false);
-		clearPreviewState({ clearAttachments: true });
 		hideAttachmentNotice();
 		messageInput.value = '';
 		resizeComposer();
-		document.querySelector('.main-header .title').textContent = '새 채팅';
+		setSending(false);
+		scrollLatestButton.hidden = true;
+		updateHeader('새 대화', '평소처럼 편하게 질문하세요');
 		renderRooms(rooms);
+		if (roomIdToDiscard !== null) {
+			discardPreviewRoom(roomIdToDiscard);
+		}
 	}
 
 	function setSending(value) {
@@ -1873,6 +2083,7 @@
 		previewDownloadButton.disabled = value;
 		sendButton.textContent = value ? '■' : '↑';
 		sendButton.title = value ? '전송 취소' : '전송';
+		sendButton.setAttribute('aria-label', value ? '응답 생성 취소' : '메시지 전송');
 		sendButton.classList.toggle('cancel-mode', value);
 	}
 
@@ -1886,6 +2097,127 @@
 	function resizeComposer() {
 		messageInput.style.height = 'auto';
 		messageInput.style.height = `${Math.min(messageInput.scrollHeight, 140)}px`;
+	}
+
+	async function discardPreviewRoom(chatRoomId) {
+		try {
+			await authorizedFetch(`/api/chat/rooms/${chatRoomId}/preview`, { method: 'DELETE' });
+		} catch (error) {
+			// 임시 방은 최근 목록 쿼리에서도 제외되므로 화면을 오류 상태로 되돌리지 않는다.
+		} finally {
+			loadRooms();
+		}
+	}
+
+	function openSidebar() {
+		sidebar.classList.add('open');
+		sidebarBackdrop.hidden = false;
+		sidebarToggleButton.setAttribute('aria-expanded', 'true');
+		document.body.classList.add('sidebar-open');
+		sidebarCloseButton.focus({ preventScroll: true });
+	}
+
+	function closeSidebar() {
+		if (!sidebar.classList.contains('open')) {
+			return;
+		}
+		sidebar.classList.remove('open');
+		sidebarBackdrop.hidden = true;
+		sidebarToggleButton.setAttribute('aria-expanded', 'false');
+		document.body.classList.remove('sidebar-open');
+	}
+
+	function openUsageGuide() {
+		usageGuideReturnFocus = document.activeElement;
+		selectUsageGuideTab('steps');
+		usageGuideModal.hidden = false;
+		updateOverlayScrollLock();
+		usageGuideCloseButton.focus({ preventScroll: true });
+	}
+
+	function closeUsageGuide() {
+		if (usageGuideModal.hidden) {
+			return;
+		}
+		usageGuideModal.hidden = true;
+		updateOverlayScrollLock();
+		if (usageGuideReturnFocus && usageGuideReturnFocus.isConnected) {
+			usageGuideReturnFocus.focus({ preventScroll: true });
+		}
+		usageGuideReturnFocus = null;
+	}
+
+	function selectUsageGuideTab(tabName) {
+		const showSteps = tabName === 'steps';
+		usageStepsTab.setAttribute('aria-selected', String(showSteps));
+		usageBenefitsTab.setAttribute('aria-selected', String(!showSteps));
+		usageStepsTab.tabIndex = showSteps ? 0 : -1;
+		usageBenefitsTab.tabIndex = showSteps ? -1 : 0;
+		usageStepsPanel.hidden = !showSteps;
+		usageBenefitsPanel.hidden = showSteps;
+	}
+
+	function openConfirmDialog() {
+		if (confirmResolver) {
+			closeConfirmDialog(false);
+		}
+		confirmReturnFocus = document.activeElement;
+		confirmModal.hidden = false;
+		updateOverlayScrollLock();
+		confirmCancelButton.focus({ preventScroll: true });
+		return new Promise(function (resolve) {
+			confirmResolver = resolve;
+		});
+	}
+
+	function closeConfirmDialog(approved) {
+		if (confirmModal.hidden) {
+			return;
+		}
+		confirmModal.hidden = true;
+		updateOverlayScrollLock();
+		const resolver = confirmResolver;
+		confirmResolver = null;
+		if (confirmReturnFocus && confirmReturnFocus.isConnected) {
+			confirmReturnFocus.focus({ preventScroll: true });
+		}
+		confirmReturnFocus = null;
+		if (resolver) {
+			resolver(Boolean(approved));
+		}
+	}
+
+	function trapFocusInOpenDialog(event) {
+		let dialog = null;
+		if (!confirmModal.hidden) {
+			dialog = confirmModal.querySelector('.confirm-dialog');
+		} else if (!maskingDetailModal.hidden) {
+			dialog = maskingDetailModal.querySelector('.masking-detail-dialog');
+		} else if (!usageGuideModal.hidden) {
+			dialog = usageGuideModal.querySelector('.usage-guide-dialog');
+		} else if (!maskingPreview.hidden) {
+			dialog = maskingPreview;
+		}
+		if (!dialog) {
+			return;
+		}
+		const focusable = Array.from(dialog.querySelectorAll(
+			'button:not([disabled]):not([hidden]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]'
+		)).filter(function (element) {
+			return element.getClientRects().length > 0;
+		});
+		if (focusable.length === 0) {
+			return;
+		}
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
 	}
 
 	function forceLogout() {
