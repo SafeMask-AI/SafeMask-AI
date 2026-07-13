@@ -8,6 +8,7 @@ import haitai.safemask.domain.masking.dto.Detection;
 import haitai.safemask.domain.masking.dto.MaskingResult;
 import haitai.safemask.domain.masking.service.MaskingService;
 import haitai.safemask.domain.maskingentity.enums.MaskingType;
+import haitai.safemask.domain.fileasset.service.WordRunTextReplacer;
 import haitai.safemask.domain.member.entity.Member;
 import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
@@ -15,7 +16,6 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,10 +32,13 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
-import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
+import org.apache.poi.xwpf.usermodel.XWPFHeader;
+import org.apache.poi.xwpf.usermodel.XWPFFooter;
+import org.apache.poi.xwpf.usermodel.XWPFFootnote;
+import org.apache.poi.xwpf.usermodel.XWPFEndnote;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -164,6 +167,22 @@ public class MaskingPreviewDownloadService {
 			for (XWPFTable table : document.getTables()) {
 				maskDocxTable(chatRoomId, table, manualMasks);
 			}
+			for (XWPFHeader header : document.getHeaderList()) {
+				maskDocxParagraphs(chatRoomId, header.getParagraphs(), manualMasks);
+				for (XWPFTable table : header.getTables()) maskDocxTable(chatRoomId, table, manualMasks);
+			}
+			for (XWPFFooter footer : document.getFooterList()) {
+				maskDocxParagraphs(chatRoomId, footer.getParagraphs(), manualMasks);
+				for (XWPFTable table : footer.getTables()) maskDocxTable(chatRoomId, table, manualMasks);
+			}
+			for (XWPFFootnote footnote : document.getFootnotes()) {
+				maskDocxParagraphs(chatRoomId, footnote.getParagraphs(), manualMasks);
+				for (XWPFTable table : footnote.getTables()) maskDocxTable(chatRoomId, table, manualMasks);
+			}
+			for (XWPFEndnote endnote : document.getEndnotes()) {
+				maskDocxParagraphs(chatRoomId, endnote.getParagraphs(), manualMasks);
+				for (XWPFTable table : endnote.getTables()) maskDocxTable(chatRoomId, table, manualMasks);
+			}
 			document.write(out);
 			return new PreviewDownloadFile(maskedName(originalName, "docx"),
 				"application/vnd.openxmlformats-officedocument.wordprocessingml.document", out.toByteArray());
@@ -190,23 +209,8 @@ public class MaskingPreviewDownloadService {
 			if (text == null || text.isBlank()) {
 				continue;
 			}
-			String masked = mask(chatRoomId, text, manualMasks);
-			if (!text.equals(masked)) {
-				replaceParagraphText(paragraph, masked);
-			}
-		}
-	}
-
-	private void replaceParagraphText(XWPFParagraph paragraph, String text) {
-		List<XWPFRun> runs = new ArrayList<>(paragraph.getRuns());
-		if (runs.isEmpty()) {
-			paragraph.createRun().setText(text);
-			return;
-		}
-
-		runs.get(0).setText(text, 0);
-		for (int i = runs.size() - 1; i > 0; i--) {
-			paragraph.removeRun(i);
+			Map<String, String> replacements = replacementsFor(chatRoomId, text, manualMasks);
+			replacements.forEach((original, token) -> WordRunTextReplacer.replace(paragraph, original, token));
 		}
 	}
 

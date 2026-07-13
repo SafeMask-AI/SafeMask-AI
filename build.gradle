@@ -33,6 +33,8 @@ dependencies {
 	implementation 'org.apache.poi:poi-ooxml:5.4.1'
 	// 구형 Word(.doc)는 poi-ooxml이 아닌 HWPF 모듈에 포함되어 있어 별도 의존성이 필요합니다.
 	implementation 'org.apache.poi:poi-scratchpad:5.4.1'
+	// PDF 본문을 서버 내부에서 추출해 마스킹한 뒤 AI에 전달합니다. 3.0.8은 2026년 공개 보안 수정이 반영된 버전입니다.
+	implementation 'org.apache.pdfbox:pdfbox:3.0.8'
 	implementation 'com.github.jsqlparser:jsqlparser:5.3'
 	implementation 'org.thymeleaf.extras:thymeleaf-extras-springsecurity6'
 	implementation 'io.jsonwebtoken:jjwt-api:0.11.5'

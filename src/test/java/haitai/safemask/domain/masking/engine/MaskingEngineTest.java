@@ -65,6 +65,65 @@ class MaskingEngineTest {
 	}
 
 	@Nested
+	@DisplayName("사번 탐지")
+	class EmployeeNumber {
+
+		@Test
+		@DisplayName("사번 계열 라벨 뒤의 7자리 숫자를 탐지한다")
+		void detectsSevenDigitsAfterEmployeeLabels() {
+			MaskingResult result = mask("사번: 2612345, 사원번호 5012345, 직원번호 9912345, 임직원번호 0012345");
+
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.EMPLOYEE_NO)
+				.extracting(Detection::originalValue)
+				.containsExactly("2612345", "5012345", "9912345", "0012345");
+			assertThat(result.maskedText()).doesNotContain("2612345", "5012345", "9912345", "0012345");
+		}
+
+		@Test
+		@DisplayName("사번 표 헤더 아래의 7자리 값을 탐지한다")
+		void detectsEmployeeNumberColumn() {
+			MaskingResult result = mask("사번\t이름\t부서\n2612345\t김민준\t총무팀\n5012345\t이서연\t영업팀");
+
+			assertThat(result.detections())
+				.filteredOn(detection -> detection.type() == MaskingType.EMPLOYEE_NO)
+				.extracting(Detection::originalValue)
+				.containsExactly("2612345", "5012345");
+		}
+
+		@Test
+		@DisplayName("문맥 없는 7자리와 다른 업무번호는 사번으로 오탐하지 않는다")
+		void rejectsUnlabeledAndOtherBusinessNumbers() {
+			MaskingResult result = mask("일련번호 2612345\n주문번호 5012345\n문서번호 9912345\n제품코드 0012345");
+
+			assertThat(result.detections())
+				.noneSatisfy(detection -> assertThat(detection.type()).isEqualTo(MaskingType.EMPLOYEE_NO));
+		}
+
+		@Test
+		@DisplayName("7자리가 아니면 사번 라벨이 있어도 탐지하지 않는다")
+		void requiresExactlySevenDigits() {
+			MaskingResult result = mask("사번 261234\n사원번호 50123456");
+
+			assertThat(result.detections())
+				.noneSatisfy(detection -> assertThat(detection.type()).isEqualTo(MaskingType.EMPLOYEE_NO));
+		}
+
+		@Test
+		@DisplayName("같은 사번은 동일 토큰으로 마스킹되고 원복된다")
+		void sameEmployeeNumberUsesSameTokenAndRestores() {
+			MaskingResult result = mask("사번 2612345 담당자가 변경됐습니다. 사원번호: 2612345");
+			List<Detection> employeeNumbers = result.detections().stream()
+				.filter(detection -> detection.type() == MaskingType.EMPLOYEE_NO)
+				.toList();
+
+			assertThat(employeeNumbers).hasSize(2);
+			assertThat(employeeNumbers.get(0).token()).isEqualTo(employeeNumbers.get(1).token());
+			assertThat(engine.restore(employeeNumbers.get(0).token(), assigner::resolve)).isEqualTo("2612345");
+		}
+	}
+
+	@Nested
 	@DisplayName("전화번호 탐지")
 	class Phone {
 
@@ -471,13 +530,14 @@ class MaskingEngineTest {
 	class ExtendedRules {
 
 		@Test
-		@DisplayName("은행명이 앞에 붙은 계좌번호를 은행명까지 포함해 탐지한다")
+		@DisplayName("은행명 문맥은 유지하고 계좌번호 값만 탐지한다")
 		void accountNumberWithBankName() {
 			MaskingResult result = mask("입금 계좌는 카카오뱅크 3333-12-3456789 입니다");
 
 			assertThat(result.detections()).hasSize(1);
 			assertThat(result.detections().get(0).type()).isEqualTo(MaskingType.ACCOUNT_NUMBER);
-			assertThat(result.detections().get(0).originalValue()).isEqualTo("카카오뱅크 3333-12-3456789");
+			assertThat(result.detections().get(0).originalValue()).isEqualTo("3333-12-3456789");
+			assertThat(result.maskedText()).isEqualTo("입금 계좌는 카카오뱅크 [ACCOUNT_001] 입니다");
 		}
 
 		@Test

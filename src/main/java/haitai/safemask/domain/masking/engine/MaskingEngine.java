@@ -107,23 +107,25 @@ public class MaskingEngine {
 
 			Matcher matcher = pattern.matcher(text);
 			while (matcher.find()) {
+				int matchStart = sensitiveGroupStart(matcher);
+				int matchEnd = sensitiveGroupEnd(matcher);
 				// 빈 문자열 매칭 방어: 잘못 등록된 규칙(예: ".*?")이 위치마다 무의미한 토큰을 만드는 것 방지
-				if (matcher.start() == matcher.end()) {
+				if (matchStart == matchEnd) {
 					continue;
 				}
-				if (overlapsAccepted(occupied, matcher.start(), matcher.end())) {
+				if (overlapsAccepted(occupied, matchStart, matchEnd)) {
 					continue;
 				}
 
-				String value = matcher.group();
+				String value = text.substring(matchStart, matchEnd);
 				// 필터가 거부한 매칭은 탐지로 인정하지 않는다 (토큰 발급 전에 거른다)
-				if (!detectionFilter.accept(rule, value, matcher.start())) {
+				if (!detectionFilter.accept(rule, value, matchStart)) {
 					continue;
 				}
 				String token = tokenAssigner.assign(rule.getType(), value);
-				detections.add(new Detection(rule.getType(), value, token, matcher.start(), matcher.end(),
+				detections.add(new Detection(rule.getType(), value, token, matchStart, matchEnd,
 					normalizeRuleName(rule.getType(), rule.getName())));
-				markAccepted(occupied, matcher.start(), matcher.end());
+				markAccepted(occupied, matchStart, matchEnd);
 			}
 		}
 
@@ -132,6 +134,25 @@ public class MaskingEngine {
 
 		detections.sort(Comparator.comparingInt(Detection::startIndex));
 		return new MaskingResult(text, replaceWithTokens(text, detections), List.copyOf(detections));
+	}
+
+	/** 규칙에 named group "sensitive"가 있으면 문맥은 남기고 해당 값 구간만 치환합니다. */
+	private int sensitiveGroupStart(Matcher matcher) {
+		try {
+			int start = matcher.start("sensitive");
+			return start >= 0 ? start : matcher.start();
+		} catch (IllegalArgumentException e) {
+			return matcher.start();
+		}
+	}
+
+	private int sensitiveGroupEnd(Matcher matcher) {
+		try {
+			int end = matcher.end("sensitive");
+			return end >= 0 ? end : matcher.end();
+		} catch (IllegalArgumentException e) {
+			return matcher.end();
+		}
 	}
 
 	private void addSqlIdentifierDetections(String text, List<Detection> detections, boolean[] occupied,

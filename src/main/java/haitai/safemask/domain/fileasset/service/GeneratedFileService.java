@@ -7,7 +7,11 @@ import haitai.safemask.domain.fileasset.enums.FileAssetStatus;
 import haitai.safemask.domain.fileasset.repository.FileAssetRepository;
 import haitai.safemask.domain.fileasset.service.AiEditBlockParser.EditBlock;
 import haitai.safemask.domain.fileasset.service.AiFileBlockParser.FileBlock;
+import haitai.safemask.domain.fileasset.service.AiWordEditBlockParser.WordEditBlock;
+import haitai.safemask.domain.fileasset.service.AiPdfEditBlockParser.PdfEditBlock;
 import haitai.safemask.domain.fileasset.service.ExcelEditExecutor.UnsupportedEditException;
+import haitai.safemask.domain.fileasset.service.WordEditExecutor.UnsupportedWordEditException;
+import haitai.safemask.domain.fileasset.service.PdfEditExecutor.UnsupportedPdfEditException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,16 +22,19 @@ import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
  * AI 응답 속 파일 블록을 실제 다운로드 가능한 파일로 만들어주는 서비스입니다.
- * 두 종류의 블록을 처리합니다.
+ * 네 종류의 블록을 처리합니다.
  * <ul>
  *   <li>[[SAFEMASK_FILE]] — 새 파일 생성: CSV 본문을 xlsx/csv/txt/md로 변환</li>
  *   <li>[[SAFEMASK_EDIT]] — 업로드 원본 수정: 원본의 "카피"에 편집 지시를 적용해
  *       서식이 보존된 결과 파일 생성 (원본은 절대 변경되지 않음)</li>
+ *   <li>[[SAFEMASK_WORD_EDIT]] — 업로드 docx 원본의 카피에 Word 전용 편집 지시 적용</li>
+ *   <li>[[SAFEMASK_PDF_EDIT]] — 업로드 PDF 원본의 카피에 안전한 페이지 단위 편집 지시 적용</li>
  * </ul>
  *
  * <p>처리 순서 (반드시 토큰 원복이 끝난 응답을 입력으로 받아야 합니다):
@@ -41,13 +48,13 @@ import org.springframework.stereotype.Service;
  * <p>블록 하나가 실패해도 답변 전체를 실패시키지 않고 해당 블록만
  * 실패 안내로 치환합니다. (텍스트 답변은 이미 유효하기 때문)
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class GeneratedFileService {
+	private static final Logger log = LoggerFactory.getLogger(GeneratedFileService.class);
 
-	/** 허용 확장자. 목록 밖 확장자(exe 등)를 모델이 지정해도 xlsx로 강제됩니다. */
-	private static final Set<String> ALLOWED_EXTENSIONS = Set.of("xlsx", "csv", "txt", "md");
+	/** 저장 가능한 결과 확장자. docx는 Word 원본 편집 결과에만 사용합니다. */
+	private static final Set<String> ALLOWED_EXTENSIONS = Set.of("xlsx", "docx", "pdf", "csv", "txt", "md");
 
 	/** 표 데이터가 아닌 본문을 그대로 저장하는 텍스트 계열 확장자 */
 	private static final Set<String> PLAIN_TEXT_EXTENSIONS = Set.of("txt", "md");
@@ -62,8 +69,12 @@ public class GeneratedFileService {
 
 	private final AiFileBlockParser aiFileBlockParser;
 	private final AiEditBlockParser aiEditBlockParser;
+	private final AiWordEditBlockParser aiWordEditBlockParser;
+	private final AiPdfEditBlockParser aiPdfEditBlockParser;
 	private final ExcelFileWriter excelFileWriter;
 	private final ExcelEditExecutor excelEditExecutor;
+	private final WordEditExecutor wordEditExecutor;
+	private final PdfEditExecutor pdfEditExecutor;
 	private final FileStorageService fileStorageService;
 	private final FileAssetRepository fileAssetRepository;
 
@@ -93,6 +104,12 @@ public class GeneratedFileService {
 		}
 		for (EditBlock block : aiEditBlockParser.parse(restoredAnswer)) {
 			pending.add(new PendingBlock(block.start(), block.end(), () -> buildEditedFile(chatRoom, block, files)));
+		}
+		for (WordEditBlock block : aiWordEditBlockParser.parse(restoredAnswer)) {
+			pending.add(new PendingBlock(block.start(), block.end(), () -> buildEditedWordFile(chatRoom, block, files)));
+		}
+		for (PdfEditBlock block : aiPdfEditBlockParser.parse(restoredAnswer)) {
+			pending.add(new PendingBlock(block.start(), block.end(), () -> buildEditedPdfFile(chatRoom, block, files)));
 		}
 		if (pending.isEmpty()) {
 			return new Outcome(restoredAnswer, List.of());
@@ -203,6 +220,51 @@ public class GeneratedFileService {
 		}
 	}
 
+	/** Word 편집은 docx만 허용하고 원본 복사본에 제한된 명령을 적용합니다. */
+	private String buildEditedWordFile(ChatRoom chatRoom, WordEditBlock block, List<GeneratedFileResponse> files) {
+		if (block.instruction() == null) {
+			return "(Word 파일 수정 지시를 해석하지 못했습니다. 다시 요청해 주세요)";
+		}
+		try {
+			Optional<FileAsset> original = findOriginalByExtension(chatRoom, block.targetFileName(), "docx");
+			if (original.isEmpty()) {
+				return "(수정할 Word 원본 파일을 찾지 못했습니다: " + block.targetFileName() + " — 파일을 다시 첨부해 주세요)";
+			}
+			byte[] originalBytes = fileStorageService.load(original.get().getStoredPath());
+			byte[] edited = wordEditExecutor.apply(originalBytes, block.instruction());
+			String resultName = sanitizeFileName(resolveWordResultName(block, original.get().getOriginalName()));
+			return saveGenerated(chatRoom, resultName, "docx", edited, files);
+		} catch (UnsupportedWordEditException e) {
+			return "(Word 파일을 수정하지 못했습니다: " + e.getMessage() + ")";
+		} catch (RuntimeException e) {
+			log.error("AI Word 편집 파일 처리에 실패했습니다. chatRoomId={}, target={}",
+				chatRoom.getId(), block.targetFileName(), e);
+			return "(Word 파일 수정에 실패했습니다: " + block.targetFileName() + ")";
+		}
+	}
+
+	/** PDF 원본 복사본에 페이지 단위 안전 연산을 적용해 다운로드 가능한 PDF를 만듭니다. */
+	private String buildEditedPdfFile(ChatRoom chatRoom, PdfEditBlock block, List<GeneratedFileResponse> files) {
+		if (block.instruction() == null) return "(PDF 파일 수정 지시를 해석하지 못했습니다. 다시 요청해 주세요)";
+		try {
+			Optional<FileAsset> original = findOriginalByExtension(chatRoom, block.targetFileName(), "pdf");
+			if (original.isEmpty()) return "(수정할 PDF 원본 파일을 찾지 못했습니다: " + block.targetFileName() + ")";
+			byte[] edited = pdfEditExecutor.apply(fileStorageService.load(original.get().getStoredPath()), block.instruction());
+			String requested = block.instruction().result();
+			String resultName = requested == null || requested.isBlank()
+				? stripExtension(original.get().getOriginalName()) + "_수정.pdf" : requested.trim();
+			if (!resultName.toLowerCase().endsWith(".pdf")) resultName += ".pdf";
+			return saveGenerated(chatRoom, sanitizeFileName(resultName), "pdf", edited, files);
+		} catch (UnsupportedPdfEditException e) {
+			return "(PDF 파일을 수정하지 못했습니다: " + e.getMessage() + ")";
+		} catch (RuntimeException e) {
+			log.error("AI PDF 편집 파일 처리에 실패했습니다. chatRoomId={}, target={}", chatRoom.getId(), block.targetFileName(), e);
+			return "(PDF 파일 수정에 실패했습니다: " + block.targetFileName() + ")";
+		}
+	}
+
+	private String stripExtension(String name) { int dot = name.lastIndexOf('.'); return dot > 0 ? name.substring(0, dot) : name; }
+
 	/** 편집 대상 조회: 파일명 일치 → 없으면 채팅방의 최근 xlsx 업로드/생성 파일로 폴백 */
 	private Optional<FileAsset> findOriginal(ChatRoom chatRoom, String targetFileName) {
 		// 최신순 목록에서 첫 건만 사용 (LIMIT 파생 쿼리의 Oracle 호환 문제 회피 — 리포지토리 주석 참고)
@@ -215,6 +277,22 @@ public class GeneratedFileService {
 				.stream()
 				.filter(asset -> "xlsx".equals(extensionOf(asset.getOriginalName())))
 				.findFirst());
+	}
+
+	private Optional<FileAsset> findOriginalByExtension(ChatRoom chatRoom, String targetFileName, String extension) {
+		return fileAssetRepository
+			.findByChatRoom_IdAndOriginalNameAndStatusInOrderByIdDesc(
+				chatRoom.getId(), targetFileName, EDITABLE_SOURCE_STATUSES)
+			.stream().filter(asset -> extension.equals(extensionOf(asset.getOriginalName()))).findFirst();
+	}
+
+	private String resolveWordResultName(WordEditBlock block, String originalName) {
+		if (block.instruction().result() != null && !block.instruction().result().isBlank()) {
+			String requested = block.instruction().result().trim();
+			return requested.toLowerCase().endsWith(".docx") ? requested : requested + ".docx";
+		}
+		int dot = originalName.lastIndexOf('.');
+		return (dot > 0 ? originalName.substring(0, dot) : originalName) + "_수정.docx";
 	}
 
 	private String resolveResultName(EditBlock block, String originalName) {
@@ -237,14 +315,25 @@ public class GeneratedFileService {
 	private String saveGenerated(ChatRoom chatRoom, String fileName, String extension, byte[] bytes,
 		List<GeneratedFileResponse> files) {
 		String storedPath = fileStorageService.store(bytes, extension);
-		FileAsset asset = fileAssetRepository.save(FileAsset.createGenerated(
-			chatRoom, fileName, storedPath, contentTypeOf(extension), bytes.length));
-
-		files.add(GeneratedFileResponse.from(asset));
-		return "생성된 파일: " + fileName + " (파일번호 " + asset.getId() + ")";
+		try {
+			FileAsset asset = fileAssetRepository.save(FileAsset.createGenerated(
+				chatRoom, fileName, storedPath, contentTypeOf(extension), bytes.length));
+			files.add(GeneratedFileResponse.from(asset));
+			return "생성된 파일: " + fileName + " (파일번호 " + asset.getId() + ")";
+		} catch (RuntimeException e) {
+			// DB 기록이 실패하면 인증 경로로 조회할 수 없는 고아 파일이 되므로 즉시 보상 삭제한다.
+			try { fileStorageService.delete(storedPath); }
+			catch (RuntimeException cleanupFailure) { e.addSuppressed(cleanupFailure); }
+			throw e;
+		}
 	}
 
 	private byte[] toBytes(FileBlock block, String extension) {
+		// docx는 Word 원본 편집 결과의 저장에는 허용하지만, CSV 기반 새 파일 블록으로는 만들 수 없다.
+		// 확장자만 docx인 잘못된 OOXML 파일을 사용자에게 제공하지 않도록 명시적으로 거절한다.
+		if ("docx".equals(extension) || "pdf".equals(extension)) {
+			throw new IllegalArgumentException("Office/PDF 새 파일은 전용 편집 블록으로만 생성할 수 있습니다");
+		}
 		if (PLAIN_TEXT_EXTENSIONS.contains(extension)) {
 			return block.body().getBytes(StandardCharsets.UTF_8);
 		}
@@ -292,6 +381,8 @@ public class GeneratedFileService {
 	private String contentTypeOf(String extension) {
 		return switch (extension) {
 			case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+			case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+			case "pdf" -> "application/pdf";
 			case "csv" -> "text/csv";
 			case "md" -> "text/markdown";
 			default -> "text/plain";
