@@ -17,6 +17,9 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -29,14 +32,16 @@ import org.springframework.web.multipart.MultipartFile;
  *
  * <p>txt/csv는 UTF-8 텍스트로 바로 읽고, Office 문서(xlsx/doc/docx)는 Apache POI로 추출합니다.
  * 추출 실패는 곧 "민감정보가 탐지 없이 누락"되는 보안 문제이므로, 형식 변형에 강한
- * 표준 파서를 사용하는 것이 원칙입니다. PDF는 아직 본문 추출기를 연결하지 않았기 때문에
- * 파일명/크기 안내만 전달합니다.
+ * 표준 파서를 사용하는 것이 원칙입니다. PDF는 PDFBox로 페이지별 텍스트를 추출하며,
+ * 텍스트 레이어가 없는 스캔 문서는 원문을 읽은 것처럼 처리하지 않고 명확히 거절합니다.
  */
 @Component
 @RequiredArgsConstructor
 public class AttachmentTextExtractor {
 
 	private static final int MAX_EXTRACTED_CHARS_PER_FILE = 30_000;
+	private static final int MAX_PDF_PAGES = 300;
+	private static final int MAX_EXCEL_CELLS = 200_000;
 	private final FileUploadPolicy fileUploadPolicy;
 
 	public String extract(List<MultipartFile> files) {
@@ -66,8 +71,7 @@ public class AttachmentTextExtractor {
 				case "xlsx" -> limit(extractXlsx(file.getBytes()));
 				case "doc" -> limit(extractDoc(file.getBytes()));
 				case "docx" -> limit(extractDocx(file.getBytes()));
-				case "pdf" -> "PDF 파일은 첨부되었습니다. 현재 단계에서는 파일명/크기만 참고할 수 있습니다. "
-					+ "본문 추출은 PDF 처리 모듈 연결 후 지원됩니다. 크기: " + file.getSize() + " bytes";
+				case "pdf" -> limit(extractPdf(file.getBytes()));
 				default -> throw new CustomException(ErrorCode.INVALID_REQUEST);
 			};
 		} catch (IOException e) {
@@ -94,6 +98,7 @@ public class AttachmentTextExtractor {
 			boolean multiSheet = workbook.getNumberOfSheets() > 1;
 
 			StringBuilder out = new StringBuilder();
+			int visitedCells = 0;
 			for (Sheet sheet : workbook) {
 				if (multiSheet) {
 					out.append("[시트: ").append(sheet.getSheetName()).append("]\n");
@@ -101,6 +106,7 @@ public class AttachmentTextExtractor {
 				for (Row row : sheet) {
 					StringBuilder line = new StringBuilder();
 					for (Cell cell : row) {
+						if (++visitedCells > MAX_EXCEL_CELLS) throw new CustomException(ErrorCode.INVALID_REQUEST, "엑셀 셀이 너무 많아 처리할 수 없습니다.");
 						line.append(formatter.formatCellValue(cell)).append('\t');
 					}
 					String lineText = line.toString().stripTrailing();
@@ -140,6 +146,44 @@ public class AttachmentTextExtractor {
 		try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes));
 			 XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
 			return normalizeExtractedText(extractor.getText());
+		}
+	}
+
+	/**
+	 * PDF의 텍스트 레이어를 페이지 단위로 추출합니다.
+	 *
+	 * <p>PDF는 화면에 글자가 보여도 실제로는 페이지 이미지뿐인 경우가 있습니다. 빈 추출 결과를
+	 * 그대로 AI에 보내면 모델이 문서를 읽었다고 오해할 수 있으므로 스캔/OCR 필요 상태로 거절합니다.
+	 * 암호화 PDF는 문서가 허용한 텍스트 추출 권한을 존중합니다.
+	 */
+	private String extractPdf(byte[] bytes) throws IOException {
+		try (PDDocument document = Loader.loadPDF(bytes)) {
+			if (document.getNumberOfPages() > MAX_PDF_PAGES) throw new CustomException(ErrorCode.INVALID_REQUEST, "PDF 페이지가 너무 많아 처리할 수 없습니다.");
+			if (document.isEncrypted() && !document.getCurrentAccessPermission().canExtractContent()) {
+				throw new CustomException(ErrorCode.INVALID_REQUEST,
+					"텍스트 추출 권한이 없는 PDF입니다. 권한을 해제한 파일을 다시 첨부해 주세요.");
+			}
+
+			PDFTextStripper stripper = new PDFTextStripper();
+			stripper.setSortByPosition(true);
+			StringBuilder extracted = new StringBuilder();
+			for (int page = 1; page <= document.getNumberOfPages(); page++) {
+				stripper.setStartPage(page);
+				stripper.setEndPage(page);
+				String pageText = normalizeExtractedText(stripper.getText(document));
+				if (!pageText.isBlank()) {
+					extracted.append("[페이지 ").append(page).append("]\n")
+						.append(pageText).append("\n\n");
+				}
+				if (extracted.length() > MAX_EXTRACTED_CHARS_PER_FILE) {
+					return limit(extracted.toString());
+				}
+			}
+			if (extracted.isEmpty()) {
+				throw new CustomException(ErrorCode.INVALID_REQUEST,
+					"텍스트를 읽을 수 없는 PDF입니다. 스캔 문서는 OCR 처리 후 다시 첨부해 주세요.");
+			}
+			return extracted.toString().trim();
 		}
 	}
 

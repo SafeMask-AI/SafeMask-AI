@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
  *   <li>카드번호(무구분): Luhn 체크섬 검증 — 카드 번호대와 자릿수가 같아도
  *       체크섬이 틀린 일반 숫자열(주문번호 등)은 제외합니다.</li>
  *   <li>여권번호: 매칭 바로 앞 문맥에 제품/코드/품번/모델이 있으면 제품코드로 보고 제외합니다.</li>
+ *   <li>사번(7자리): 사번 계열 라벨 바로 뒤의 값 또는 해당 표 컬럼 값만 인정합니다.</li>
  * </ul>
  */
 public final class DetectionPolicies {
@@ -32,6 +33,14 @@ public final class DetectionPolicies {
 
 	/** 이름 컬럼 값으로 인정하는 형태: 한글 2~4자 (성+이름) */
 	private static final Pattern NAME_CELL_VALUE = Pattern.compile("[가-힣]{2,4}");
+
+	private static final Set<String> EMPLOYEE_NO_HEADERS = Set.of(
+		"사번", "사원번호", "직원번호", "임직원번호");
+
+	private static final Pattern EMPLOYEE_NO_VALUE = Pattern.compile("\\d{7}");
+
+	private static final Pattern EMPLOYEE_NO_INLINE_CONTEXT = Pattern.compile(
+		"(?:사번|사원번호|직원번호|임직원번호)[ \\t]*[:：]?[ \\t]*$");
 
 	/**
 	 * 이름 컬럼에 있어도 값이 아니라 또 다른 라벨일 가능성이 큰 접미사.
@@ -58,10 +67,12 @@ public final class DetectionPolicies {
 	/**
 	 * 표 스캔 결과.
 	 *
-	 * @param confirmedNames 이름 컬럼/라벨의 값 — 사전에 없어도 이름으로 확정
-	 * @param headerLabels   표 헤더 행의 라벨들 — 이름 모양이어도 이름이 아니라고 확정
+	 * @param confirmedNames       이름 컬럼/라벨의 값 — 사전에 없어도 이름으로 확정
+	 * @param headerLabels         표 헤더 행의 라벨들 — 이름 모양이어도 이름이 아니라고 확정
+	 * @param confirmedEmployeeNos 사번 계열 컬럼/라벨의 7자리 값
 	 */
-	private record TableScan(Set<String> confirmedNames, Set<String> headerLabels) {
+	private record TableScan(Set<String> confirmedNames, Set<String> headerLabels,
+		Set<String> confirmedEmployeeNos) {
 	}
 
 	/**
@@ -85,9 +96,19 @@ public final class DetectionPolicies {
 					acceptName(rule.getName(), value, scan, givenNames);
 				case MaskingRuleSeeder.CARD_CONTIGUOUS_RULE_NAME -> passesLuhn(value);
 				case MaskingRuleSeeder.PASSPORT_RULE_NAME -> !isProductCodeContext(text, start);
+				case MaskingRuleSeeder.EMPLOYEE_NO_RULE_NAME ->
+					acceptEmployeeNo(text, value, start, scan);
 				default -> true;
 			};
 		};
+	}
+
+	private static boolean acceptEmployeeNo(String text, String value, int start, TableScan scan) {
+		if (scan.confirmedEmployeeNos().contains(value)) {
+			return true;
+		}
+		String before = text.substring(Math.max(0, start - 20), start);
+		return EMPLOYEE_NO_INLINE_CONTEXT.matcher(before).find();
 	}
 
 	private static boolean acceptName(String ruleName, String value, TableScan scan, Set<String> givenNames) {
@@ -124,12 +145,15 @@ public final class DetectionPolicies {
 	private static TableScan scanTables(String text) {
 		Set<String> confirmedNames = new HashSet<>();
 		Set<String> headerLabels = new HashSet<>();
+		Set<String> confirmedEmployeeNos = new HashSet<>();
 		List<Integer> nameColumns = List.of();
+		List<Integer> employeeNoColumns = List.of();
 		boolean firstRowOfBlock = true;
 
 		for (String line : text.split("\n", -1)) {
 			if (!line.contains("\t")) {
 				nameColumns = List.of();
+				employeeNoColumns = List.of();
 				firstRowOfBlock = true;
 				continue;
 			}
@@ -143,6 +167,12 @@ public final class DetectionPolicies {
 						confirmedNames.add(next);
 					}
 				}
+				if (isEmployeeNoHeader(cells[i].trim())) {
+					String next = cells[i + 1].trim();
+					if (EMPLOYEE_NO_VALUE.matcher(next).matches()) {
+						confirmedEmployeeNos.add(next);
+					}
+				}
 			}
 
 			if (firstRowOfBlock) {
@@ -152,6 +182,7 @@ public final class DetectionPolicies {
 				// 첫 행 이름을 라벨로 오인해 놓치는 것을 모두 방지)
 				if (looksLikeHeaderRow(cells)) {
 					nameColumns = findNameHeaderColumns(cells);
+					employeeNoColumns = findEmployeeNoHeaderColumns(cells);
 					for (String cell : cells) {
 						String label = cell.trim();
 						// 가로형에서 이름 값으로 확정된 칸은 라벨이 아니다
@@ -168,8 +199,16 @@ public final class DetectionPolicies {
 					confirmedNames.add(cells[column].trim());
 				}
 			}
+			for (int column : employeeNoColumns) {
+				if (column < cells.length) {
+					String candidate = cells[column].trim();
+					if (EMPLOYEE_NO_VALUE.matcher(candidate).matches()) {
+						confirmedEmployeeNos.add(candidate);
+					}
+				}
+			}
 		}
-		return new TableScan(confirmedNames, headerLabels);
+		return new TableScan(confirmedNames, headerLabels, confirmedEmployeeNos);
 	}
 
 	/**
@@ -198,10 +237,24 @@ public final class DetectionPolicies {
 		return NAME_COLUMN_HEADERS.contains(cell) || cell.endsWith("이름") || cell.endsWith("성명");
 	}
 
+	private static boolean isEmployeeNoHeader(String cell) {
+		return EMPLOYEE_NO_HEADERS.contains(cell);
+	}
+
 	private static List<Integer> findNameHeaderColumns(String[] cells) {
 		List<Integer> columns = new ArrayList<>();
 		for (int i = 0; i < cells.length; i++) {
 			if (isNameHeader(cells[i].trim())) {
+				columns.add(i);
+			}
+		}
+		return columns;
+	}
+
+	private static List<Integer> findEmployeeNoHeaderColumns(String[] cells) {
+		List<Integer> columns = new ArrayList<>();
+		for (int i = 0; i < cells.length; i++) {
+			if (isEmployeeNoHeader(cells[i].trim())) {
 				columns.add(i);
 			}
 		}

@@ -15,6 +15,11 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
@@ -89,6 +94,33 @@ class AttachmentTextExtractorTest {
 			"application/vnd.openxmlformats-officedocument.wordprocessingml.document", docx)));
 
 		assertThat(extracted).contains("word-test.docx", "김민수", "010-2345-6789");
+	}
+
+	@Test
+	@DisplayName("PDF 본문은 페이지 표시와 함께 추출되어 마스킹 대상이 된다")
+	void pdfTextExtractedForMaskingPipeline() throws IOException {
+		byte[] pdf = buildPdf("contact user@example.com or 010-2345-6789");
+
+		String extracted = extractor.extract(List.of(new MockMultipartFile(
+			"files", "document.pdf", "application/pdf", pdf)));
+
+		assertThat(extracted).contains("document.pdf", "[페이지 1]", "user@example.com", "010-2345-6789");
+	}
+
+	@Test
+	@DisplayName("텍스트 레이어가 없는 PDF는 읽은 것처럼 처리하지 않고 OCR 안내와 함께 거절한다")
+	void scannedPdfRejected() throws IOException {
+		byte[] pdf;
+		try (PDDocument document = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+			document.addPage(new PDPage());
+			document.save(out);
+			pdf = out.toByteArray();
+		}
+
+		assertThatThrownBy(() -> extractor.extract(List.of(new MockMultipartFile(
+			"files", "scan.pdf", "application/pdf", pdf))))
+			.isInstanceOf(CustomException.class)
+			.hasMessageContaining("OCR");
 	}
 
 	@Test
@@ -214,5 +246,21 @@ class AttachmentTextExtractorTest {
 			document.write(out);
 		}
 		return out.toByteArray();
+	}
+
+	private byte[] buildPdf(String text) throws IOException {
+		try (PDDocument document = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+			PDPage page = new PDPage();
+			document.addPage(page);
+			try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+				content.beginText();
+				content.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+				content.newLineAtOffset(40, 750);
+				content.showText(text);
+				content.endText();
+			}
+			document.save(out);
+			return out.toByteArray();
+		}
 	}
 }

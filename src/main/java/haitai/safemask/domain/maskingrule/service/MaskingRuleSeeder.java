@@ -99,6 +99,7 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 	public static final String CARD_CONTIGUOUS_RULE_NAME = "카드번호(무구분)";
 	public static final String PASSPORT_RULE_NAME = "여권번호";
 	public static final String SQL_QUALIFIED_IDENTIFIER_RULE_NAME = "SQL 한정 식별자";
+	public static final String EMPLOYEE_NO_RULE_NAME = "사번(7자리)";
 
 	/**
 	 * 이름 탐지 휴리스틱 3 (문장 속, 사전 검증 필수):
@@ -171,8 +172,8 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 	public static List<MaskingRule> defaultRules() {
 		return List.of(
 			MaskingRule.create("Private Key 블록", MaskingType.SECURITY_SECRET,
-				"-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----", 1,
-				"PEM 형식 개인키 전체 블록. 키 원문은 어떤 작업 목적에서도 외부 전송되면 안 되므로 최우선으로 탐지합니다."),
+				"-----BEGIN [A-Z ]*PRIVATE KEY-----\\s*(?<sensitive>[\\s\\S]*?)\\s*-----END [A-Z ]*PRIVATE KEY-----", 1,
+				"PEM 형식 개인키의 BEGIN/END 표시는 유지하고 실제 키 본문만 최우선으로 마스킹합니다."),
 
 			MaskingRule.create("JWT 토큰", MaskingType.SECURITY_SECRET,
 				"\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b", 2,
@@ -187,7 +188,7 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 				"DB 접속 문자열. 서버·DB명·계정 정보가 함께 포함될 수 있어 보안 시크릿으로 취급합니다."),
 
 			MaskingRule.create("API/Secret/Access Token 값", MaskingType.SECURITY_SECRET,
-				"(?i)\\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|pwd)\\s*[:=]\\s*[\"']?[^\\s\"',;]{8,}", 5,
+				"(?i)\\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|pwd)[ \\t]*[:=][ \\t]*[\"']?(?<sensitive>[^\\s\"',;]{8,})", 5,
 				"API Key, Secret Key, Access Token, Refresh Token, 비밀번호 대입 구문. 키 이름 문맥이 있을 때만 값을 포함해 탐지합니다."),
 
 			MaskingRule.create("S3 URI", MaskingType.TECH_IDENTIFIER,
@@ -225,7 +226,7 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 					+ "계좌·카드번호보다 먼저 적용해 숫자 그룹이 이중 탐지되지 않게 합니다."),
 
 			MaskingRule.create("계좌번호", MaskingType.ACCOUNT_NUMBER,
-				"(국민|신한|우리|하나|농협|기업|산업|수협|우체국|새마을|씨티|SC제일|대구|부산|광주|전북|경남|제주|케이뱅크|카카오뱅크|토스뱅크|KB|NH|IBK)(은행)?\\s?\\d{2,6}(-\\d{1,7}){1,3}(?!\\d)", 18,
+				"(?:국민|신한|우리|하나|농협|기업|산업|수협|우체국|새마을|씨티|SC제일|대구|부산|광주|전북|경남|제주|케이뱅크|카카오뱅크|토스뱅크|KB|NH|IBK)(?:은행)?[ \\t]?(?<sensitive>\\d{2,6}(?:-\\d{1,7}){1,3})(?!\\d)", 18,
 				"은행명 + 하이픈 구분 숫자 그룹(2~4개) 형식의 계좌번호. 은행별로 자릿수가 제각각이라 "
 					+ "은행명 문맥을 필수로 요구해 일반 숫자 나열이 계좌로 오탐되는 것을 막습니다. "
 					+ "은행명 없이 숫자만 적힌 계좌는 미리보기에서 추가 마스킹으로 보완합니다."),
@@ -273,24 +274,30 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 					+ "주소 안의 지명(강남구 등)이 이름으로 오탐되는 것을 구간 선점으로 차단합니다."),
 
 			MaskingRule.create("공시 전 재무/실적 수치", MaskingType.FINANCIAL_RESULT,
-				"(?:매출|영업이익|순이익|EBITDA|실적|전망치|목표치|내부\\s?KPI|예산|투자계획|CAPEX|OPEX)\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN, 56,
+				"(?:매출|영업이익|순이익|EBITDA|실적|전망치|목표치|내부[ \\t]?KPI|예산|투자계획|CAPEX|OPEX)[ \\t]*[:：]?[ \\t]*(?<sensitive>" + BUSINESS_AMOUNT_PATTERN + ")", 56,
 				"공시 전일 수 있는 재무·실적·예산 수치. 일반 금액은 유지하고 재무 문맥의 수치만 탐지합니다."),
 
 			MaskingRule.create("원가/가격/마진 정보", MaskingType.COST_PRICE,
-				"(?:원가|공급가|납품단가|판매단가|마진율|할인율|견적가|입찰가|리베이트|수수료율)\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN, 57,
+				"(?:원가|공급가|납품단가|판매단가|마진율|할인율|견적가|입찰가|리베이트|수수료율)[ \\t]*[:：]?[ \\t]*(?<sensitive>" + BUSINESS_AMOUNT_PATTERN + ")", 57,
 				"원가·단가·마진·견적·입찰 문맥의 금액/비율. 계산용 일반 금액은 과도하게 가리지 않습니다."),
 
 			MaskingRule.create("계약/거래 조건 금액", MaskingType.CONTRACT_AMOUNT,
-				"(?:계약금액|계약금|위약금|보증금|선급금|중도금|잔금|지급조건)\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN, 58,
+				"(?:계약금액|계약금|위약금|보증금|선급금|중도금|잔금|지급조건)[ \\t]*[:：]?[ \\t]*(?<sensitive>" + BUSINESS_AMOUNT_PATTERN + ")", 58,
 				"계약서·거래 조건에서 금액 자체가 민감한 항목만 탐지합니다."),
 
 			MaskingRule.create("인사/급여 금액", MaskingType.HR_COMPENSATION,
-				"(?:연봉|급여|성과급|퇴직금|상여금|수당)\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN, 59,
+				"(?:연봉|급여|성과급|퇴직금|상여금|수당)[ \\t]*[:：]?[ \\t]*(?<sensitive>" + BUSINESS_AMOUNT_PATTERN + ")", 59,
 				"개인 식별자와 결합되면 민감도가 높은 급여·보상성 금액."),
 
-			MaskingRule.create("법무/소송 식별 정보", MaskingType.LEGAL_DOCUMENT,
-				"(?:사건번호\\s*[:：]?\\s*\\d{2,4}[가-힣]{1,6}\\d{1,8}|법무법인\\s?[가-힣A-Za-z0-9]{2,20}|합의금\\s*[:：]?\\s*" + BUSINESS_AMOUNT_PATTERN + ")", 59,
-				"소송 사건번호, 법무법인명, 합의금 등 법무 문서에서 민감한 식별 정보."),
+			MaskingRule.create("법무 사건번호", MaskingType.LEGAL_DOCUMENT,
+				"사건번호[ \\t]*[:：]?[ \\t]*(?<sensitive>\\d{2,4}[가-힣]{1,6}\\d{1,8})", 59,
+				"사건번호 라벨은 유지하고 실제 번호만 마스킹합니다."),
+			MaskingRule.create("법무법인명", MaskingType.LEGAL_DOCUMENT,
+				"법무법인[ \\t]?(?<sensitive>[가-힣A-Za-z0-9]{2,20})", 59,
+				"법무법인 라벨은 유지하고 법인명만 마스킹합니다."),
+			MaskingRule.create("법무 합의금", MaskingType.LEGAL_DOCUMENT,
+				"합의금[ \\t]*[:：]?[ \\t]*(?<sensitive>" + BUSINESS_AMOUNT_PATTERN + ")", 59,
+				"합의금 라벨은 유지하고 금액만 마스킹합니다."),
 
 			MaskingRule.create("이름(호칭 문맥)", MaskingType.NAME,
 				NAME_WITH_TITLE_PATTERN, 60,
@@ -311,13 +318,19 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 					+ "이름 사전 검증과 반드시 함께 적용됩니다 — 이름 부분이 사전에 있을 때만 확정되며, "
 					+ "사전이 비어 있으면 규칙 자체가 적용에서 제외됩니다."),
 
+			MaskingRule.create(EMPLOYEE_NO_RULE_NAME, MaskingType.EMPLOYEE_NO,
+				"(?<!\\d)\\d{7}(?!\\d)", 63,
+				"입사 연도 두 자리와 일련번호 다섯 자리로 구성된 7자리 사번 후보. "
+					+ "일반 7자리 숫자 오탐을 막기 위해 사번/사원번호/직원번호/임직원번호 라벨 또는 "
+					+ "표 헤더 문맥을 DetectionPolicies에서 확인한 값만 최종 탐지합니다."),
+
 			MaskingRule.create("차량번호", MaskingType.VEHICLE_NUMBER,
 				"(?<![\\d가-힣])\\d{2,3}[가나다라마바사아자카타파거너더러머버서어저고노도로모보소오조구누두루무부수우주하허호배]\\s?\\d{4}(?!\\d)", 65,
 				"자동차 등록번호판(숫자 2~3자리 + 용도 한글 1자 + 숫자 4자리). 번호판 용도 기호로 쓰이는 "
 					+ "한글만 허용하고, 주소 규칙보다 뒤에 적용해 주소 속 번지·호수가 오탐되지 않게 합니다."),
 
 			MaskingRule.create("고객/거래처 식별 정보", MaskingType.CUSTOMER_ACCOUNT,
-				"(?:고객사|거래처|계약상대방|파트너사)\\s*[:：]?\\s*(?:\\(주\\)|주식회사|㈜)?[가-힣A-Za-z0-9][가-힣A-Za-z0-9 .&()㈜-]{1,24}", 70,
+				"(?:고객사|거래처|계약상대방|파트너사)[ \\t]*[:：]?[ \\t]*(?<sensitive>(?:\\(주\\)|주식회사|㈜)?[가-힣A-Za-z0-9][가-힣A-Za-z0-9 .&()㈜-]{1,24})", 70,
 				"고객사·거래처·계약 상대방 이름. 문맥 키워드가 있을 때만 탐지해 일반 회사명 오탐을 줄입니다."),
 
 			MaskingRule.create("영업비밀/전략 문서명", MaskingType.TRADE_SECRET,
@@ -325,7 +338,7 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 				"문서 제목이나 요청문에 드러나는 영업비밀·전략 키워드. 문서 자체가 민감함을 표시합니다."),
 
 			MaskingRule.create("내부 문서/관리번호", MaskingType.INTERNAL_DOC_ID,
-				"(?:품의|결재|문서|프로젝트|발주|주문|송장|전표|세금계산서)(?:번호|코드)?\\s*[:：]?\\s*[A-Z가-힣]{0,8}-?\\d{2,}(?:-[A-Z0-9가-힣]+)*", 72,
+				"(?:품의|결재|문서|프로젝트|발주|주문|송장|전표|세금계산서)(?:번호|코드)?[ \\t]*[:：]?[ \\t]*(?<sensitive>[A-Z가-힣]{0,8}-?\\d{2,}(?:-[A-Z0-9가-힣]+)*)", 72,
 				"품의번호, 결재번호, 문서번호, 발주번호 등 회사 내부 추적 가능한 관리번호.")
 		);
 	}

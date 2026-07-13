@@ -5,6 +5,7 @@ import haitai.safemask.global.exception.ErrorCode;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.io.IOException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -51,6 +52,29 @@ public class FileUploadPolicy {
 			throw new CustomException(ErrorCode.INVALID_REQUEST,
 				"파일 크기는 10MB 이하만 업로드할 수 있습니다: " + originalName);
 		}
+		validateSignature(file, extension);
+	}
+
+	private void validateSignature(MultipartFile file, String extension) {
+		if (Set.of("txt", "csv").contains(extension)) return;
+		try {
+			byte[] bytes = file.getBytes();
+			boolean valid = switch (extension) {
+				case "pdf" -> startsWith(bytes, new byte[]{'%', 'P', 'D', 'F', '-'});
+				case "xlsx", "docx" -> startsWith(bytes, new byte[]{'P', 'K'});
+				case "doc" -> startsWith(bytes, new byte[]{(byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0});
+				default -> false;
+			};
+			if (!valid) throw new CustomException(ErrorCode.INVALID_REQUEST, "파일 확장자와 실제 형식이 일치하지 않습니다: " + file.getOriginalFilename());
+		} catch (IOException e) {
+			throw new CustomException(ErrorCode.INVALID_REQUEST, e);
+		}
+	}
+
+	private boolean startsWith(byte[] bytes, byte[] signature) {
+		if (bytes.length < signature.length) return false;
+		for (int i = 0; i < signature.length; i++) if (bytes[i] != signature[i]) return false;
+		return true;
 	}
 
 	public String extensionOf(String fileName) {
