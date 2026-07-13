@@ -21,6 +21,11 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
 				  FROM MASK_CHATROOM cr
 				 WHERE cr.member_id = :memberId
 				   AND cr.status = :status
+				   AND EXISTS (
+						SELECT 1
+						  FROM MASK_CHAT_MESSAGE cm
+						 WHERE cm.chatroom_id = cr.id
+				   )
 				 ORDER BY cr.updated_at DESC
 		  )
 		 WHERE ROWNUM <= :limit
