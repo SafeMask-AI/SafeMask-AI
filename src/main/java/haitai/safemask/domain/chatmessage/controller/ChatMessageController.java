@@ -4,10 +4,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import haitai.safemask.domain.chatmessage.dto.ChatRegenerateRequest;
+import haitai.safemask.domain.chatmessage.dto.ChatCancelResponse;
 import haitai.safemask.domain.chatmessage.dto.ChatSendRequest;
 import haitai.safemask.domain.chatmessage.dto.ChatSendResponse;
 import haitai.safemask.domain.chatmessage.dto.ManualMaskRequest;
 import haitai.safemask.domain.chatmessage.service.ChatMessageService;
+import haitai.safemask.domain.chatmessage.service.ChatMessageStreamService;
 import haitai.safemask.domain.chatmessage.service.MaskingPreviewDownloadService;
 import haitai.safemask.domain.chatmessage.service.MaskingPreviewDownloadService.PreviewDownloadFile;
 import haitai.safemask.domain.member.entity.Member;
@@ -22,12 +24,15 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequiredArgsConstructor
@@ -35,6 +40,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class ChatMessageController {
 
 	private final ChatMessageService chatMessageService;
+	private final ChatMessageStreamService chatMessageStreamService;
 	private final MaskingPreviewDownloadService maskingPreviewDownloadService;
 	private final ObjectMapper objectMapper;
 
@@ -42,6 +48,12 @@ public class ChatMessageController {
 	public ResponseEntity<ChatSendResponse> send(@AuthenticationPrincipal Member member,
 		@RequestBody ChatSendRequest request) {
 		return ResponseEntity.ok(chatMessageService.send(member, request));
+	}
+
+	@PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public ResponseEntity<SseEmitter> sendStream(@AuthenticationPrincipal Member member,
+		@RequestBody ChatSendRequest request) {
+		return streamResponse(chatMessageStreamService.send(member, request));
 	}
 
 	/** 답변 재생성: 채팅방의 마지막 AI 답변을 지우고 같은 맥락으로 다시 생성합니다. */
@@ -62,6 +74,31 @@ public class ChatMessageController {
 		List<ManualMaskRequest> masks = parseManualMasks(manualMasks);
 		ChatSendRequest request = new ChatSendRequest(chatRoomId, content, approved, masks);
 		return ResponseEntity.ok(chatMessageService.sendWithFiles(member, request, files));
+	}
+
+	@PostMapping(value = "/with-files/stream", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+		produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public ResponseEntity<SseEmitter> sendWithFilesStream(@AuthenticationPrincipal Member member,
+		@RequestParam(required = false) Long chatRoomId,
+		@RequestParam String content,
+		@RequestParam(defaultValue = "false") Boolean approved,
+		@RequestParam(defaultValue = "[]") String manualMasks,
+		@RequestPart(value = "files", required = false) List<MultipartFile> files) {
+		ChatSendRequest request = new ChatSendRequest(chatRoomId, content, approved, parseManualMasks(manualMasks));
+		return streamResponse(chatMessageStreamService.sendWithFiles(member, request, files));
+	}
+
+	private ResponseEntity<SseEmitter> streamResponse(SseEmitter emitter) {
+		return ResponseEntity.ok()
+			.header(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform")
+			.header("X-Accel-Buffering", "no")
+			.body(emitter);
+	}
+
+	@DeleteMapping("/runs/{aiRunId}")
+	public ResponseEntity<ChatCancelResponse> cancelRun(@AuthenticationPrincipal Member member,
+		@PathVariable Long aiRunId) {
+		return ResponseEntity.ok(new ChatCancelResponse(chatMessageStreamService.cancel(member, aiRunId)));
 	}
 
 	@PostMapping(value = "/preview-download", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

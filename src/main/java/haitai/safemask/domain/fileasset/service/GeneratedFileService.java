@@ -139,8 +139,8 @@ public class GeneratedFileService {
 	 * 답변 재생성으로 교체되는 assistant 메시지에 연결된 생성 파일을 더 이상
 	 * 활성 다운로드 대상으로 보지 않도록 정리합니다.
 	 *
-	 * <p>같은 트랜잭션 안에서 호출되므로 재생성이 실패하면 메시지 삭제와 함께
-	 * 파일 상태 변경도 롤백됩니다. 물리 파일은 채팅방 정리 시 삭제하고, 여기서는
+	 * <p>새 답변 저장과 같은 교체 트랜잭션 안에서 호출되므로 저장이 실패하면 메시지 삭제와 함께
+	 * 파일 상태 변경도 롤백됩니다. 외부 AI 호출 전에는 실행하지 않습니다. 물리 파일은 채팅방 정리 시 삭제하고, 여기서는
 	 * 기존 다운로드 버튼/히스토리 중복 노출을 막기 위해 상태만 바꿉니다.
 	 */
 	public void retireGeneratedFilesFromAnswer(ChatRoom chatRoom, String answerContent) {

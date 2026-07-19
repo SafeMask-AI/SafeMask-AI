@@ -50,7 +50,7 @@ public class AiRun {
 	@Column(nullable = false, length = 20)
 	private AiRunStatus status;
 
-	/** 호출한 GPT 모델명 (예: gpt-4o) */
+	/** 호출한 OpenAI 모델명 (예: gpt-5.5) */
 	@Column(length = 50)
 	private String model;
 
@@ -99,12 +99,18 @@ public class AiRun {
 	}
 
 	public void markCalling(String model) {
+		if (this.status != AiRunStatus.APPROVED) {
+			throw new IllegalStateException("Only approved AI runs can start calling.");
+		}
 		this.status = AiRunStatus.CALLING;
 		this.model = model;
 		this.requestedAt = LocalDateTime.now();
 	}
 
 	public void markCompleted(String model, Integer promptTokens, Integer completionTokens) {
+		if (this.status != AiRunStatus.CALLING) {
+			throw new IllegalStateException("Only calling AI runs can be completed.");
+		}
 		this.status = AiRunStatus.COMPLETED;
 		this.model = model;
 		this.promptTokens = promptTokens;
@@ -113,9 +119,23 @@ public class AiRun {
 	}
 
 	public void markFailed(String message) {
+		// 완료 또는 사용자 취소로 확정된 상태는 뒤늦게 도착한 예외가 덮어쓰지 못하게 한다.
+		if (this.status == AiRunStatus.COMPLETED || this.status == AiRunStatus.CANCELLED) {
+			return;
+		}
 		this.status = AiRunStatus.FAILED;
 		this.errorMessage = message == null ? null : message.substring(0, Math.min(message.length(), 1000));
 		this.completedAt = LocalDateTime.now();
+	}
+
+	public boolean markCancelled() {
+		if (this.status != AiRunStatus.APPROVED && this.status != AiRunStatus.CALLING) {
+			return false;
+		}
+		this.status = AiRunStatus.CANCELLED;
+		this.errorMessage = null;
+		this.completedAt = LocalDateTime.now();
+		return true;
 	}
 
 	@PrePersist

@@ -1,6 +1,10 @@
 package haitai.safemask.domain.chatmessage.service;
 
 import haitai.safemask.domain.airun.entity.AiRun;
+import haitai.safemask.domain.airun.gateway.AiGateway;
+import haitai.safemask.domain.airun.gateway.AiGatewayResponse;
+import haitai.safemask.domain.airun.gateway.AiProgressListener;
+import haitai.safemask.domain.airun.gateway.AiPromptMessage;
 import haitai.safemask.domain.airun.prompt.SafeMaskSystemPrompt;
 import haitai.safemask.domain.airun.repository.AiRunRepository;
 import haitai.safemask.domain.chatmessage.dto.ChatSendRequest;
@@ -29,14 +33,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.metadata.Usage;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -66,7 +62,7 @@ public class ChatMessageService {
 	private final AttachmentTextExtractor attachmentTextExtractor;
 	private final GeneratedFileService generatedFileService;
 	private final FileAssetService fileAssetService;
-	private final ChatModel chatModel;
+	private final AiGateway aiGateway;
 	private final String modelName;
 	private final TransactionTemplate writeTransaction;
 
@@ -78,7 +74,7 @@ public class ChatMessageService {
 		AttachmentTextExtractor attachmentTextExtractor,
 		GeneratedFileService generatedFileService,
 		FileAssetService fileAssetService,
-		ChatModel chatModel,
+		AiGateway aiGateway,
 		PlatformTransactionManager transactionManager,
 		@Value("${safemask.ai.model:gpt-5.5}") String modelName) {
 		this.chatRoomRepository = chatRoomRepository;
@@ -89,12 +85,32 @@ public class ChatMessageService {
 		this.attachmentTextExtractor = attachmentTextExtractor;
 		this.generatedFileService = generatedFileService;
 		this.fileAssetService = fileAssetService;
-		this.chatModel = chatModel;
+		this.aiGateway = aiGateway;
 		this.modelName = modelName;
 		this.writeTransaction = new TransactionTemplate(transactionManager);
 	}
 
-	private record InitialUserWrite(Long chatRoomId, Long userMessageId, Long aiRunId) {
+	private record InitialUserWrite(Long chatRoomId, Long userMessageId, Long aiRunId,
+		Long previousAssistantMessageId) {
+	}
+
+	/**
+	 * 마스킹 미리보기 또는 AI 호출 직전까지 확정된 요청입니다.
+	 *
+	 * <p>SSE 응답은 HTTP 연결을 반환하기 전에 첨부 추출·원본 저장까지 끝내야 임시 업로드
+	 * 파일의 수명과 무관하게 안전하게 비동기 AI 호출을 시작할 수 있습니다.
+	 */
+	public record PreparedSend(
+		ChatSendResponse previewResponse,
+		Long chatRoomId,
+		Long userMessageId,
+		Long aiRunId,
+		Map<MaskingType, Long> summary,
+		List<MaskingDetectionResponse> detections
+	) {
+		public boolean previewRequired() {
+			return previewResponse != null;
+		}
 	}
 
 	/**
@@ -106,20 +122,30 @@ public class ChatMessageService {
 	 */
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public ChatSendResponse send(Member member, ChatSendRequest request) {
-		return sendInternal(member, request, request.content(), null);
+		return completePrepared(prepare(member, request), AiProgressListener.NONE);
 	}
 
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public ChatSendResponse sendWithFiles(Member member, ChatSendRequest request, List<MultipartFile> files) {
+		return completePrepared(prepareWithFiles(member, request, files), AiProgressListener.NONE);
+	}
+
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	public PreparedSend prepare(Member member, ChatSendRequest request) {
+		return prepareInternal(member, request, request.content(), null);
+	}
+
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	public PreparedSend prepareWithFiles(Member member, ChatSendRequest request, List<MultipartFile> files) {
 		String attachmentText = attachmentTextExtractor.extract(files);
 		String baseContent = request.content() == null ? "" : request.content().trim();
 		String processingContent = (baseContent + attachmentText).trim();
 		String displayContent = buildDisplayContent(baseContent, files);
-		return sendInternal(member, new ChatSendRequest(request.chatRoomId(), processingContent, request.approved(),
+		return prepareInternal(member, new ChatSendRequest(request.chatRoomId(), processingContent, request.approved(),
 			request.manualMasks()), displayContent, files);
 	}
 
-	private ChatSendResponse sendInternal(Member member, ChatSendRequest request, String displayContent,
+	private PreparedSend prepareInternal(Member member, ChatSendRequest request, String displayContent,
 		List<MultipartFile> files) {
 		validateRequest(request);
 		boolean forcePreview = files != null && !files.isEmpty();
@@ -133,15 +159,54 @@ public class ChatMessageService {
 			.toList();
 
 		if ((forcePreview || maskingResult.hasDetections()) && !request.isApproved()) {
-			return ChatSendResponse.preview(chatRoom.getId(), temporaryChatRoom, maskingResult.maskedText(),
-				maskingResult.summary(), detections);
+			return new PreparedSend(
+				ChatSendResponse.preview(chatRoom.getId(), temporaryChatRoom, maskingResult.maskedText(),
+					maskingResult.summary(), detections),
+				null, null, null, maskingResult.summary(), detections);
 		}
 
 		// 첨부 원본은 미리보기 단계에서는 저장하지 않고, 사용자가 전송을 확정한 시점에만 보관한다.
 		// AI 호출은 이 쓰기 트랜잭션이 끝난 뒤 실행해 DB 커넥션을 오래 붙잡지 않는다.
 		InitialUserWrite write = saveApprovedUserMessage(chatRoom.getId(), displayContent, maskingResult, files);
-		return generateAnswer(write.chatRoomId(), write.userMessageId(), write.aiRunId(),
+		return new PreparedSend(null, write.chatRoomId(), write.userMessageId(), write.aiRunId(),
 			maskingResult.summary(), detections);
+	}
+
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	public ChatSendResponse completePrepared(PreparedSend prepared, AiProgressListener progressListener) {
+		if (prepared.previewRequired()) {
+			return prepared.previewResponse();
+		}
+		return generateAnswer(prepared.chatRoomId(), prepared.userMessageId(), prepared.aiRunId(),
+			prepared.summary(), prepared.detections(), progressListener, null);
+	}
+
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	public void failPrepared(PreparedSend prepared, String message) {
+		if (prepared != null && !prepared.previewRequired() && prepared.aiRunId() != null) {
+			markAiRunFailed(prepared.aiRunId(), message);
+		}
+	}
+
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	public void verifyRunOwner(Member member, Long aiRunId) {
+		if (member == null || aiRunId == null) {
+			throw new CustomException(ErrorCode.NOT_FOUND);
+		}
+		boolean owned = aiRunRepository.findById(aiRunId)
+			.map(aiRun -> aiRun.getChatRoom().getMember().getId().equals(member.getId()))
+			.orElse(false);
+		if (!owned) {
+			throw new CustomException(ErrorCode.NOT_FOUND);
+		}
+	}
+
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	public boolean markRunCancelled(Long aiRunId) {
+		Boolean cancelled = writeTransaction.execute(status -> aiRunRepository.findByIdForUpdate(aiRunId)
+			.map(AiRun::markCancelled)
+			.orElse(false));
+		return Boolean.TRUE.equals(cancelled);
 	}
 
 	private InitialUserWrite saveApprovedUserMessage(Long chatRoomId, String displayContent, MaskingResult maskingResult,
@@ -155,15 +220,15 @@ public class ChatMessageService {
 			managedChatRoom.touch();
 			AiRun aiRun = aiRunRepository.save(AiRun.createApproved(managedChatRoom, userMessage));
 			saveMaskingAudit(aiRun, maskingResult.detections());
-			return new InitialUserWrite(managedChatRoom.getId(), userMessage.getId(), aiRun.getId());
+			return new InitialUserWrite(managedChatRoom.getId(), userMessage.getId(), aiRun.getId(), null);
 		});
 	}
 
 	/**
-	 * 마지막 AI 답변을 지우고 같은 대화 맥락으로 다시 생성합니다. (답변 재생성 버튼)
+	 * 마지막 AI 답변과 같은 대화 맥락으로 새 답변을 생성합니다. (답변 재생성 버튼)
 	 *
-	 * <p>사용자 메시지는 그대로 두고 마지막 ASSISTANT 메시지만 삭제한 뒤 GPT를 다시
-	 * 호출하므로, 마스킹·원복 흐름은 최초 전송과 동일하게 동작합니다.
+	 * <p>외부 AI 호출에 실패해도 기존 답변이 사라지지 않도록 호출 전에는 삭제하지 않습니다.
+	 * 새 답변 생성과 원복이 성공한 뒤 같은 쓰기 트랜잭션에서 기존 답변을 교체합니다.
 	 * 이전 답변의 AiRun·마스킹 감사 기록은 이력 추적을 위해 삭제하지 않습니다.
 	 */
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -190,15 +255,15 @@ public class ChatMessageService {
 				.orElseThrow(() -> new CustomException(ErrorCode.INVALID_REQUEST, "다시 생성할 AI 답변이 없습니다."));
 
 			ChatMessage lastAssistantMessage = messages.get(0);
-			generatedFileService.retireGeneratedFilesFromAnswer(chatRoom, lastAssistantMessage.getOriginalContent());
-			chatMessageRepository.delete(lastAssistantMessage);
 			chatRoom.touch();
 			AiRun aiRun = aiRunRepository.save(AiRun.createApproved(chatRoom, lastUserMessage));
-			return new InitialUserWrite(chatRoom.getId(), lastUserMessage.getId(), aiRun.getId());
+			return new InitialUserWrite(chatRoom.getId(), lastUserMessage.getId(), aiRun.getId(),
+				lastAssistantMessage.getId());
 		});
 
 		// 재생성은 새 입력이 없으므로 마스킹 요약·탐지 정보 없이 답변만 새로 만든다
-		return generateAnswer(write.chatRoomId(), write.userMessageId(), write.aiRunId(), Map.of(), List.of());
+		return generateAnswer(write.chatRoomId(), write.userMessageId(), write.aiRunId(), Map.of(), List.of(),
+			AiProgressListener.NONE, write.previousAssistantMessageId());
 	}
 
 	/**
@@ -206,17 +271,19 @@ public class ChatMessageService {
 	 * (최초 전송과 답변 재생성이 공유하는 공통 경로)
 	 */
 	private ChatSendResponse generateAnswer(Long chatRoomId, Long userMessageId, Long aiRunId,
-		Map<MaskingType, Long> summary, List<MaskingDetectionResponse> detections) {
+		Map<MaskingType, Long> summary, List<MaskingDetectionResponse> detections,
+		AiProgressListener progressListener, Long previousAssistantMessageId) {
 		try {
 			markAiRunCalling(aiRunId);
 			ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
 				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
-			ChatResponse response = chatModel.call(new Prompt(buildPromptMessages(chatRoom)));
-			String maskedAnswer = response.getResult().getOutput().getText();
+			AiGatewayResponse response = aiGateway.generate(
+				buildPromptMessages(chatRoom, previousAssistantMessageId), progressListener);
+			String maskedAnswer = response.maskedText();
 			String restoredAnswer = maskingService.restore(chatRoom.getId(), maskedAnswer);
-			Usage usage = response.getMetadata() == null ? null : response.getMetadata().getUsage();
 			return saveAssistantAnswer(chatRoomId, userMessageId, aiRunId, restoredAnswer, maskedAnswer,
-				resolveModel(response), usage, summary, detections);
+				response.model(), response.inputTokens(), response.outputTokens(), summary, detections,
+				previousAssistantMessageId);
 		} catch (RuntimeException e) {
 			markAiRunFailed(aiRunId, e.getMessage());
 			if (e instanceof CustomException customException) {
@@ -227,38 +294,54 @@ public class ChatMessageService {
 	}
 
 	private void markAiRunCalling(Long aiRunId) {
-		writeTransaction.executeWithoutResult(status -> aiRunRepository.findById(aiRunId)
+		writeTransaction.executeWithoutResult(status -> aiRunRepository.findByIdForUpdate(aiRunId)
 			.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND))
 			.markCalling(modelName));
 	}
 
 	private void markAiRunFailed(Long aiRunId, String message) {
-		writeTransaction.executeWithoutResult(status -> aiRunRepository.findById(aiRunId)
+		writeTransaction.executeWithoutResult(status -> aiRunRepository.findByIdForUpdate(aiRunId)
 			.ifPresent(aiRun -> aiRun.markFailed(message)));
 	}
 
 	private ChatSendResponse saveAssistantAnswer(Long chatRoomId, Long userMessageId, Long aiRunId,
-		String restoredAnswer, String maskedAnswer, String responseModel, Usage usage,
-		Map<MaskingType, Long> summary, List<MaskingDetectionResponse> detections) {
+		String restoredAnswer, String maskedAnswer, String responseModel, Integer inputTokens, Integer outputTokens,
+		Map<MaskingType, Long> summary, List<MaskingDetectionResponse> detections,
+		Long previousAssistantMessageId) {
 		return writeTransaction.execute(status -> {
 			ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
 				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
 			ChatMessage userMessage = chatMessageRepository.findById(userMessageId)
 				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
-			AiRun aiRun = aiRunRepository.findById(aiRunId)
+			// 취소와 완료가 경합하면 먼저 행 잠금을 얻은 상태 전이만 성공한다. 취소가 먼저
+			// 확정된 경우 markCompleted가 거부되어 답변/생성 파일 저장 전체가 롤백된다.
+			AiRun aiRun = aiRunRepository.findByIdForUpdate(aiRunId)
 				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
+
+			ChatMessage previousAssistant = null;
+			if (previousAssistantMessageId != null) {
+				previousAssistant = chatMessageRepository.findById(previousAssistantMessageId)
+					.filter(message -> message.getChatRoom().getId().equals(chatRoomId)
+						&& message.getRole() == MessageRole.ASSISTANT)
+					.orElseThrow(() -> new CustomException(ErrorCode.INVALID_REQUEST,
+						"교체할 이전 AI 답변을 찾을 수 없습니다."));
+			}
 
 			// 원복이 끝난 응답에서 파일 블록을 실제 파일로 변환하고 안내 문구로 치환.
 			// (원복 후에 실행해야 파일에 토큰이 아닌 원본값이 담긴다)
 			GeneratedFileService.Outcome fileOutcome = generatedFileService.materialize(chatRoom, restoredAnswer);
+
+			if (previousAssistant != null) {
+				generatedFileService.retireGeneratedFilesFromAnswer(chatRoom, previousAssistant.getOriginalContent());
+				chatMessageRepository.delete(previousAssistant);
+			}
 
 			// 화면·원본 보관용에는 치환된 본문을, GPT 컨텍스트용(maskedContent)에는
 			// 파일 블록이 남은 마스킹 응답을 그대로 저장해 모델이 자기 산출물을 기억하게 한다.
 			ChatMessage assistantMessage = chatMessageRepository.save(
 				ChatMessage.create(chatRoom, MessageRole.ASSISTANT, fileOutcome.displayContent(), maskedAnswer));
 
-			aiRun.markCompleted(responseModel, usage == null ? null : usage.getPromptTokens(),
-				usage == null ? null : usage.getCompletionTokens());
+			aiRun.markCompleted(responseModel, inputTokens, outputTokens);
 
 			return ChatSendResponse.completed(chatRoom.getId(), userMessage.getId(), assistantMessage.getId(),
 				fileOutcome.displayContent(), summary, detections, fileOutcome.files());
@@ -341,29 +424,27 @@ public class ChatMessageService {
 		maskingEntityRepository.saveAll(entities);
 	}
 
-	private List<Message> buildPromptMessages(ChatRoom chatRoom) {
+	private List<AiPromptMessage> buildPromptMessages(ChatRoom chatRoom, Long excludedAssistantMessageId) {
 		List<ChatMessage> recentMessages = new ArrayList<>(
 			chatMessageRepository.findRecentByChatRoomIdOrderByIdDesc(chatRoom.getId(), CONTEXT_MESSAGE_LIMIT));
 		Collections.reverse(recentMessages);
 
-		List<Message> messages = new ArrayList<>();
-		messages.add(new SystemMessage(SafeMaskSystemPrompt.DEFAULT));
+		List<AiPromptMessage> messages = new ArrayList<>();
+		messages.add(new AiPromptMessage("system", SafeMaskSystemPrompt.DEFAULT));
 
 		for (ChatMessage chatMessage : recentMessages) {
+			if (excludedAssistantMessageId != null && excludedAssistantMessageId.equals(chatMessage.getId())) {
+				continue;
+			}
 			if (chatMessage.getMaskedContent() == null || chatMessage.getMaskedContent().isBlank()) {
 				continue;
 			}
 			if (chatMessage.getRole() == MessageRole.USER) {
-				messages.add(new UserMessage(chatMessage.getMaskedContent()));
+				messages.add(new AiPromptMessage("user", chatMessage.getMaskedContent()));
 			} else {
-				messages.add(new AssistantMessage(chatMessage.getMaskedContent()));
+				messages.add(new AiPromptMessage("assistant", chatMessage.getMaskedContent()));
 			}
 		}
 		return messages;
-	}
-
-	private String resolveModel(ChatResponse response) {
-		String responseModel = response.getMetadata() == null ? null : response.getMetadata().getModel();
-		return responseModel == null || responseModel.isBlank() ? modelName : responseModel;
 	}
 }

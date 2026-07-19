@@ -3,6 +3,7 @@ package haitai.safemask.global.security;
 import haitai.safemask.domain.member.repository.MemberRepository;
 import haitai.safemask.global.jwt.JwtAuthenticationFilter;
 import haitai.safemask.global.jwt.JwtTokenProvider;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import org.springframework.context.annotation.Bean;
@@ -57,6 +58,11 @@ public class SecurityConfig {
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
 			.authorizeHttpRequests(auth -> auth
+				// SSE/DeferredResult의 ASYNC 디스패치는 최초 REQUEST 디스패치에서 이미 JWT 인증과
+				// URL 권한 검사를 통과한 동일 요청의 후속 처리입니다. Stateless 정책 때문에 이때
+				// SecurityContext가 비어 있어도 다시 403으로 막지 않습니다. DispatcherType은 서블릿
+				// 컨테이너가 정하므로 외부 요청이 이 규칙으로 일반 API 인증을 우회할 수 없습니다.
+				.dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
 				// 회원가입·로그인·토큰 갱신은 토큰이 없는 상태에서 호출되므로 허용합니다.
 				.requestMatchers("/api/auth/**").permitAll()
 				// Thymeleaf 화면(로그인/회원가입)과 정적 리소스 (필요 시 경로 추가)

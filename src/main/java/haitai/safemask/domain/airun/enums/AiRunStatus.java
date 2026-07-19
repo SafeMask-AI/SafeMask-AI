@@ -4,7 +4,8 @@ package haitai.safemask.domain.airun.enums;
  * AI 실행 파이프라인의 진행 단계입니다.
  *
  * <p>정상 흐름: PENDING → PREVIEW → APPROVED → CALLING → COMPLETED
- * <br>사용자가 미리보기에서 거부하면 REJECTED, 중간에 오류가 나면 FAILED로 종료됩니다.
+ * <br>사용자가 미리보기에서 거부하면 REJECTED, 진행 중 중단하면 CANCELLED,
+ * 중간에 오류가 나면 FAILED로 종료됩니다.
  */
 public enum AiRunStatus {
 
@@ -25,6 +26,9 @@ public enum AiRunStatus {
 
 	/** GPT 응답 수신 및 토큰 원복까지 완료 */
 	COMPLETED,
+
+	/** 사용자가 진행 중인 응답 생성을 명시적으로 중단함 */
+	CANCELLED,
 
 	/** 탐지·호출·원복 중 오류 발생 */
 	FAILED
