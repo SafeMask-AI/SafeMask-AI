@@ -922,6 +922,32 @@ body.modal-open .sidebar {
 	line-height: 1.45;
 }
 
+.preview-prompt-editor {
+	display: grid;
+	gap: 8px;
+	margin: 14px 22px 0;
+}
+
+.preview-prompt-editor span {
+	color: var(--text-dark);
+	font-size: 12px;
+	font-weight: 900;
+}
+
+.preview-prompt-editor textarea {
+	width: 100%;
+	min-height: 78px;
+	max-height: 160px;
+	padding: 11px 12px;
+	border: 1px solid #e8d7df;
+	border-radius: 8px;
+	background: #fffdfd;
+	color: var(--text-dark);
+	font-size: 13px;
+	line-height: 1.55;
+	resize: vertical;
+}
+
 .preview-detail-toggle {
 	display: flex;
 	align-items: center;
@@ -2201,6 +2227,7 @@ body.modal-open .sidebar {
 	.preview-detail,
 	.preview-detail-toggle,
 	.preview-feedback,
+	.preview-prompt-editor,
 	.manual-mask,
 	.manual-mask-list {
 		margin-inline: 16px;

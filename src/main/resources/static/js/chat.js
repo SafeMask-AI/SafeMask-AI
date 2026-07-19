@@ -101,6 +101,7 @@
 	const maskingPreviewBackdrop = document.getElementById('maskingPreviewBackdrop');
 	const previewSummary = document.getElementById('previewSummary');
 	const previewText = document.getElementById('previewText');
+	const previewPromptInput = document.getElementById('previewPromptInput');
 	const previewDetailButton = document.getElementById('previewDetailButton');
 	const previewApproveButton = document.getElementById('previewApproveButton');
 	const previewCancelButton = document.getElementById('previewCancelButton');
@@ -233,13 +234,19 @@
 		cancelMaskingPreview();
 	});
 	previewEditButton.addEventListener('click', function () {
-		const content = pendingPreview ? pendingPreview.content : '';
+		const content = getPreviewPromptContent();
 		clearPreviewState({ restoreAttachments: true, removePendingUserRow: true });
 		if (content && !messageInput.value.trim()) {
 			messageInput.value = content;
 			resizeComposer();
 		}
 		messageInput.focus();
+	});
+	previewPromptInput.addEventListener('input', function () {
+		if (pendingPreview) {
+			pendingPreview.content = getPreviewPromptContent();
+		}
+		resizePreviewPromptInput();
 	});
 	previewDownloadButton.addEventListener('click', downloadMaskingPreview);
 	previewDetailButton.addEventListener('click', function () {
@@ -290,7 +297,7 @@
 	});
 
 	async function sendMessage(approved) {
-		const typedContent = approved && pendingPreview ? pendingPreview.content : messageInput.value.trim();
+		const typedContent = approved && pendingPreview ? getPreviewPromptContent() : messageInput.value.trim();
 		const content = typedContent;
 		if ((!content && attachedFiles.length === 0) || sending) {
 			return;
@@ -323,6 +330,8 @@
 			optimisticUserRow = appendMessage('user', content, { files: sentFiles });
 			messageInput.value = '';
 			resizeComposer();
+		} else if (pendingPreview && pendingPreview.userRow) {
+			updateUserMessageRow(pendingPreview.userRow, content, sentFiles);
 		} else if (!pendingPreview || !pendingPreview.userRow) {
 			appendMessage('user', content, { files: sentFiles });
 		}
@@ -478,6 +487,29 @@
 		updateRegenerateVisibility();
 		scrollMessageListToBottom();
 		return row;
+	}
+
+	function updateUserMessageRow(row, text, files) {
+		if (!row) {
+			return;
+		}
+		const body = row.querySelector('.message-body');
+		if (!body) {
+			return;
+		}
+		body.innerHTML = '';
+		if (text && text.trim()) {
+			const bubble = document.createElement('div');
+			bubble.className = 'message-bubble';
+			bubble.textContent = text;
+			body.appendChild(bubble);
+		}
+		if (files && files.length > 0) {
+			const sentFiles = createFileCardList(files, { removable: false });
+			sentFiles.classList.add('sent-files');
+			body.appendChild(sentFiles);
+		}
+		scrollMessageListToBottom();
 	}
 
 	function appendStatusMessage(text) {
@@ -1037,7 +1069,7 @@
 		try {
 			const formData = new FormData();
 			formData.append('chatRoomId', String(currentChatRoomId));
-			formData.append('content', pendingPreview.content || '');
+			formData.append('content', getPreviewPromptContent());
 			formData.append('manualMasks', JSON.stringify(manualMasks));
 			attachedFiles.forEach(function (file) {
 				formData.append('files', file);
@@ -1106,6 +1138,8 @@
 			: '첨부 파일 내용을 확인했습니다. 추가로 가릴 항목이 있으면 지정한 뒤 전송하세요.';
 		currentPreviewData = data;
 		currentPreviewTotalCount = totalCount;
+		previewPromptInput.value = pendingPreview ? pendingPreview.content : '';
+		resizePreviewPromptInput();
 		setPreviewFeedback('');
 		renderPreviewDetails(data);
 		renderManualMasks();
@@ -1441,6 +1475,15 @@
 		return original.slice(detection.startIndex, detection.endIndex);
 	}
 
+	function getPreviewPromptContent() {
+		return previewPromptInput.value.trim();
+	}
+
+	function resizePreviewPromptInput() {
+		previewPromptInput.style.height = 'auto';
+		previewPromptInput.style.height = `${Math.min(previewPromptInput.scrollHeight, 160)}px`;
+	}
+
 	function clearPreviewState(options) {
 		const clearAttachments = Boolean(options && options.clearAttachments);
 		const restoreAttachments = !options || options.restoreAttachments !== false;
@@ -1451,6 +1494,8 @@
 		setMaskingPreviewVisible(false);
 		previewSummary.textContent = '';
 		previewText.innerHTML = '';
+		previewPromptInput.value = '';
+		previewPromptInput.style.height = '';
 		previewDetailButton.hidden = true;
 		setPreviewFeedback('');
 		manualMaskValue.value = '';
