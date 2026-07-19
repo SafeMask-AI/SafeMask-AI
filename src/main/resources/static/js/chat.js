@@ -314,12 +314,18 @@
 		const requestState = {
 			controller: new AbortController(),
 			cancelled: false,
+			accepted: false,
+			aiRunId: null,
+			userCancelled: false,
 			navigationVersion: navigationVersion
 		};
 		activeRequest = requestState;
 
 		let optimisticUserRow = null;
 		const sentFiles = attachedFiles.slice();
+		const requestTitle = content || (sentFiles.length === 1
+			? `${sentFiles[0].name} 분석`
+			: `첨부 파일 ${sentFiles.length}개 분석`);
 		if (!approved) {
 			optimisticUserRow = appendMessage('user', content, { files: sentFiles });
 			messageInput.value = '';
@@ -330,9 +336,7 @@
 			appendMessage('user', content, { files: sentFiles });
 		}
 
-		const statusProfile = buildStatusProfile(approved, attachedFiles.length > 0);
-		const statusRow = appendStatusMessage(statusProfile.initial);
-		const statusTicker = startStatusTicker(statusRow, statusProfile);
+		const statusRow = appendStatusMessage(buildInitialStatus(approved, attachedFiles.length > 0));
 
 		try {
 			const response = await sendChatRequest(content, approved, requestState.controller.signal);
@@ -345,17 +349,37 @@
 				return;
 			}
 
-			const data = await readResponseBody(response);
 			if (!response.ok) {
+				const data = await readResponseBody(response);
 				throw new Error(data.message || '요청 처리 중 오류가 발생했습니다.');
 			}
+			const data = await readChatStreamResponse(response, function (eventName, eventData) {
+				if (requestState.navigationVersion !== navigationVersion) {
+					return;
+				}
+				if (eventName === 'accepted') {
+					requestState.accepted = true;
+					requestState.aiRunId = eventData.aiRunId || null;
+					currentChatRoomId = eventData.chatRoomId || currentChatRoomId;
+					updateStatusMessage(statusRow, '요청을 안전하게 전송했어요. 필요한 작업을 판단하는 중...');
+					finalizeAcceptedInputState();
+					updateRoomTitle(requestTitle);
+					loadRooms();
+				} else if (eventName === 'status') {
+					updateStatusMessage(statusRow, eventData.message || '답변을 준비하는 중...');
+				} else if (eventName === 'sources') {
+					const count = Array.isArray(eventData) ? eventData.length : 0;
+					if (count > 0) {
+						updateStatusMessage(statusRow, `웹 출처 ${count}개를 확인하고 답변을 정리하는 중...`);
+					}
+				}
+			}, requestState.controller.signal);
 
 			currentChatRoomId = data.chatRoomId || currentChatRoomId;
-			updateRoomTitle(content || buildAttachmentTitle());
+			updateRoomTitle(requestTitle);
 			loadRooms();
 
 			if (data.previewRequired) {
-				stopStatusTicker(statusTicker);
 				removeMessageRow(statusRow);
 				pendingPreview = {
 					content: content,
@@ -372,36 +396,36 @@
 				return;
 			}
 
-			stopStatusTicker(statusTicker);
 			await replaceStatusWithTypingMessage(statusRow, data.assistantContent || '', function () {
 				return requestState.cancelled;
 			});
-			pendingPreview = null;
-			temporaryPreviewRoomId = null;
-			manualMasks = [];
-			attachedFiles = [];
-			renderAttachments();
+			finalizeAcceptedInputState();
 		} catch (error) {
-			stopStatusTicker(statusTicker);
 			removeMessageRow(statusRow);
 			if (requestState.navigationVersion !== navigationVersion) {
 				return;
 			}
-			if (error.name === 'AbortError') {
-					if (optimisticUserRow && !approved) {
+			if (requestState.userCancelled) {
+				appendMessage('system', '응답 생성을 중단했습니다.');
+			} else if (error.name === 'AbortError') {
+				if (optimisticUserRow && !approved) {
 						removeMessageRow(optimisticUserRow);
 						messageInput.value = content;
 						resizeComposer();
-					}
-				if (approved && pendingPreview) {
+				}
+				if (!requestState.accepted && approved && pendingPreview) {
 					setMaskingPreviewVisible(true);
 					attachmentList.hidden = true;
 				}
+			} else if (requestState.accepted && error.streamReported) {
+				appendMessage('system', resolveRequestErrorMessage(error));
+			} else if (requestState.accepted) {
+				appendMessage('system', '응답 연결이 종료되어 생성을 중단했습니다. 다시 전송해 주세요.');
 			} else if (approved && pendingPreview) {
 				setMaskingPreviewVisible(true);
 				setPreviewFeedback(`${resolveRequestErrorMessage(error)} 내용을 유지했으니 다시 전송할 수 있습니다.`);
 			} else {
-				if (optimisticUserRow && !approved) {
+				if (!requestState.accepted && optimisticUserRow && !approved) {
 					removeMessageRow(optimisticUserRow);
 					messageInput.value = content;
 					resizeComposer();
@@ -415,6 +439,14 @@
 				setSending(false);
 			}
 		}
+	}
+
+	function finalizeAcceptedInputState() {
+		pendingPreview = null;
+		temporaryPreviewRoomId = null;
+		manualMasks = [];
+		attachedFiles = [];
+		renderAttachments();
 	}
 
 	function appendMessage(role, text, options) {
@@ -511,105 +543,14 @@
 		}
 	}
 
-	function startStatusTicker(row, profile) {
-		let timer = null;
-		let lastMessage = profile.initial;
-		const startedAt = Date.now();
-
-		function pickMessage(messages) {
-			const candidates = messages.filter(function (message) {
-				return message !== lastMessage;
-			});
-			const pool = candidates.length > 0 ? candidates : messages;
-			return pool[Math.floor(Math.random() * pool.length)];
-		}
-
-		function nextDelay(elapsedMs) {
-			if (elapsedMs < 5000) {
-				return randomBetween(2800, 4600);
-			}
-			if (elapsedMs < 12000) {
-				return randomBetween(4200, 6800);
-			}
-			return randomBetween(6500, 9500);
-		}
-
-		function schedule() {
-			const elapsedMs = Date.now() - startedAt;
-			timer = window.setTimeout(function () {
-				const currentElapsedMs = Date.now() - startedAt;
-				const messages = currentElapsedMs >= 12000 ? profile.slow : profile.normal;
-				lastMessage = pickMessage(messages);
-				updateStatusMessage(row, lastMessage);
-				schedule();
-			}, nextDelay(elapsedMs));
-		}
-
-		schedule();
-		return {
-			stop: function () {
-				if (timer) {
-					window.clearTimeout(timer);
-				}
-			}
-		};
-	}
-
-	function stopStatusTicker(ticker) {
-		if (ticker) {
-			ticker.stop();
-		}
-	}
-
-	function randomBetween(min, max) {
-		return Math.floor(Math.random() * (max - min + 1)) + min;
-	}
-
-	function buildStatusProfile(approved, hasFiles) {
+	function buildInitialStatus(approved, hasFiles) {
 		if (approved) {
-			return {
-				initial: '승인된 내용으로 답변을 요청하는 중...',
-				normal: [
-					'보안 처리된 문맥을 정리하는 중...',
-					'AI 답변을 기다리는 중...',
-					'응답에 필요한 내용을 맞춰보는 중...'
-				],
-				slow: [
-					'조금 더 확인하고 있어요. 잠시만 기다려 주세요...',
-					'답변을 마무리하는데 시간이 조금 걸리고 있어요...',
-					'결과를 정리하는 중...'
-				]
-			};
+			return '승인된 마스킹 내용을 안전하게 저장하는 중...';
 		}
 		if (hasFiles) {
-			return {
-				initial: '첨부 파일을 살펴보는 중...',
-				normal: [
-					'문서 내용을 읽고 있어요...',
-					'표와 텍스트를 확인하는 중...',
-					'민감정보가 있는 부분을 살펴보는 중...',
-					'안전하게 가릴 내용을 정리하는 중...'
-				],
-				slow: [
-					'파일 내용이 조금 많아요. 계속 확인하고 있어요...',
-					'조금 더 확인하고 있어요. 잠시만 기다려 주세요...',
-					'문서 내용을 정리하는 데 시간이 조금 걸리고 있어요...'
-				]
-			};
+			return '첨부 파일을 읽고 민감정보를 검사하는 중...';
 		}
-		return {
-			initial: '메시지를 살펴보는 중...',
-			normal: [
-				'민감정보가 있는 부분을 확인하는 중...',
-				'안전하게 가릴 내용을 정리하는 중...',
-				'답변에 쓸 문맥을 준비하는 중...'
-			],
-			slow: [
-				'조금 더 확인하고 있어요. 잠시만 기다려 주세요...',
-				'응답을 준비하는 데 시간이 조금 걸리고 있어요...',
-				'결과를 정리하는 중...'
-			]
-		};
+		return '메시지의 민감정보를 검사하는 중...';
 	}
 
 	function removeMessageRow(row) {
@@ -675,9 +616,10 @@
 			bubble.textContent = text;
 			return;
 		}
-		// 한 글자씩 일정하게 보여 짧은 답변도 몰아치지 않게 하고, 긴 답변은 대기 시간이
-		// 과도해지지 않도록 길이에 따라 지연을 단계적으로 줄인다.
-		const baseDelay = text.length > 2400 ? 7 : text.length > 1200 ? 11 : text.length > 600 ? 16 : 22;
+		// 답변은 서버에서 전체 원복·검증된 뒤 도착한다. 실제 생성 시간처럼 오래 끌지 않고
+		// 길이에 따라 8~48자씩 빠르게 펼쳐, 완료된 결과라는 사실과 읽기 흐름을 함께 보존한다.
+		const chunkSize = Math.max(8, Math.min(48, Math.ceil(text.length / 70)));
+		const baseDelay = 12;
 		bubble.classList.add('markdown');
 
 		// 떨림(렉) 방지 구조: 매 글자마다 전체를 다시 렌더링하면 표·코드블록 DOM이
@@ -692,27 +634,25 @@
 		bubble.appendChild(tail);
 
 		let flushedLength = 0; // stable에 반영이 끝난 텍스트 길이
-		for (let i = 0; i < text.length; i += 1) {
+		for (let i = 0; i < text.length; i += chunkSize) {
 			if (shouldCancel && shouldCancel()) {
 				throw new DOMException('Aborted', 'AbortError');
 			}
-			const char = text.charAt(i);
+			const visibleEnd = Math.min(text.length, i + chunkSize);
+			const visibleText = text.slice(0, visibleEnd);
+			const lastNewline = visibleText.lastIndexOf('\n');
 
-			if (char === '\n') {
-				// 줄이 완성된 순간에만 완성분 전체를 마크다운으로 다시 그린다
-				stable.innerHTML = renderMarkdown(text.slice(0, i + 1));
-				tail.textContent = '';
-				flushedLength = i + 1;
-			} else {
-				tail.textContent = text.slice(flushedLength, i + 1);
+			if (lastNewline + 1 > flushedLength) {
+				stable.innerHTML = renderMarkdown(text.slice(0, lastNewline + 1));
+				flushedLength = lastNewline + 1;
 			}
+			tail.textContent = text.slice(flushedLength, visibleEnd);
 
-			const punctuationPause = /[.!?。！？\n]/.test(char);
 			// 사용자가 위로 스크롤해 읽고 있으면 위치를 빼앗지 않는다.
-			if (punctuationPause) {
+			if (/[.!?。！？\n]$/.test(visibleText)) {
 				scrollMessageListToBottom();
 			}
-			await sleep(punctuationPause ? baseDelay * 5 : baseDelay);
+			await sleep(baseDelay);
 		}
 	}
 
@@ -1589,10 +1529,11 @@
 
 	function sendChatRequest(content, approved, signal) {
 		if (attachedFiles.length === 0) {
-			return authorizedFetch('/api/chat/messages', {
+			return authorizedFetch('/api/chat/messages/stream', {
 				method: 'POST',
 				headers: {
-					'Content-Type': 'application/json'
+					'Content-Type': 'application/json',
+					'Accept': 'text/event-stream'
 				},
 				body: JSON.stringify({
 					chatRoomId: currentChatRoomId,
@@ -1615,8 +1556,9 @@
 			formData.append('files', file);
 		});
 
-		return authorizedFetch('/api/chat/messages/with-files', {
+		return authorizedFetch('/api/chat/messages/with-files/stream', {
 			method: 'POST',
+			headers: { 'Accept': 'text/event-stream' },
 			body: formData,
 			signal: signal
 		});
@@ -2091,11 +2033,98 @@
 		return { message: text || `HTTP ${response.status}` };
 	}
 
+	/**
+	 * fetch 응답의 SSE 프레임을 증분 파싱합니다. EventSource는 Authorization 헤더와 POST 본문을
+	 * 보낼 수 없어 사용하지 않고, 인증 갱신이 가능한 기존 authorizedFetch 위에서 읽습니다.
+	 */
+	async function readChatStreamResponse(response, onEvent, signal) {
+		const contentType = response.headers.get('content-type') || '';
+		if (!contentType.includes('text/event-stream')) {
+			return readResponseBody(response);
+		}
+		if (!response.body) {
+			throw new Error('실시간 응답 스트림을 열지 못했습니다.');
+		}
+
+		const reader = response.body.getReader();
+		const decoder = new TextDecoder('utf-8');
+		let buffer = '';
+		let result = null;
+
+		function consumeBlock(block) {
+			const parsed = parseSseBlock(block);
+			if (!parsed) {
+				return;
+			}
+			if (onEvent) {
+				onEvent(parsed.name, parsed.data);
+			}
+			if (parsed.name === 'preview' || parsed.name === 'completed') {
+				result = parsed.data;
+			} else if (parsed.name === 'error') {
+				const streamError = new Error(parsed.data.message || 'AI 응답을 완료하지 못했습니다.');
+				streamError.streamReported = true;
+				throw streamError;
+			}
+		}
+		try {
+			while (true) {
+				if (signal && signal.aborted) {
+					throw new DOMException('Aborted', 'AbortError');
+				}
+				const chunk = await reader.read();
+				buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+				buffer = buffer.replace(/\r\n/g, '\n');
+
+				let boundary;
+				while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+					const block = buffer.slice(0, boundary);
+					buffer = buffer.slice(boundary + 2);
+					consumeBlock(block);
+				}
+				if (chunk.done) {
+					// 빠른 응답이나 중간 프록시가 마지막 빈 줄 구분자를 제거해도
+					// 이미 수신한 completed/error 이벤트를 버리지 않고 마지막으로 처리한다.
+					if (buffer.trim()) {
+						consumeBlock(buffer.replace(/\r$/, ''));
+						buffer = '';
+					}
+					break;
+				}
+			}
+		} finally {
+			reader.releaseLock();
+		}
+		if (!result) {
+			throw new Error('AI 응답이 완료되기 전에 연결이 종료되었습니다.');
+		}
+		return result;
+	}
+
+	function parseSseBlock(block) {
+		let name = 'message';
+		const dataLines = [];
+		block.split('\n').forEach(function (line) {
+			if (line.startsWith('event:')) {
+				name = line.slice(6).trim();
+			} else if (line.startsWith('data:')) {
+				dataLines.push(line.slice(5).trimStart());
+			}
+		});
+		if (dataLines.length === 0) {
+			return null;
+		}
+		try {
+			return { name: name, data: JSON.parse(dataLines.join('\n')) };
+		} catch (error) {
+			throw new Error('실시간 응답 형식이 올바르지 않습니다.');
+		}
+	}
+
 	function resetToNewChat() {
 		navigationVersion += 1;
 		if (activeRequest) {
-			activeRequest.cancelled = true;
-			activeRequest.controller.abort();
+			cancelActiveRequest();
 			activeRequest = null;
 		}
 		if (activeHistoryRequest) {
@@ -2132,10 +2161,35 @@
 		sendButton.classList.toggle('cancel-mode', value);
 	}
 
-	function cancelActiveRequest() {
-		if (activeRequest) {
-			activeRequest.cancelled = true;
-			activeRequest.controller.abort();
+	async function cancelActiveRequest() {
+		const request = activeRequest;
+		if (!request) {
+			return;
+		}
+		const cancelNavigationVersion = navigationVersion;
+		request.cancelled = true;
+		request.userCancelled = true;
+		try {
+			if (request.accepted && request.aiRunId) {
+				const response = await authorizedFetch(`/api/chat/messages/runs/${request.aiRunId}`, { method: 'DELETE' });
+				const result = response.ok ? await readResponseBody(response) : { cancelled: false };
+				if (!result.cancelled) {
+					request.cancelled = false;
+					request.userCancelled = false;
+					return;
+				}
+			}
+		} catch (error) {
+			request.cancelled = false;
+			request.userCancelled = false;
+			if (cancelNavigationVersion === navigationVersion) {
+				appendMessage('system', '응답 생성을 중단하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+			}
+			return;
+		} finally {
+			if (request.userCancelled) {
+				request.controller.abort();
+			}
 		}
 	}
 
