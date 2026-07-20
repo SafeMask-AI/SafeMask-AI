@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>회원 승인 관리 | SafeMask</title><link rel="stylesheet" th:href="@{/css/admin.css}"></head>
+<body><div class="layout">
+<aside><a class="brand" href="/chat"><img th:src="@{/images/haitai-logo.jpg}" alt="해태"><span><small>HAITAI SECURE AI</small><b>SafeMask</b></span></a>
+<nav><a class="active" href="/admin">✓ 회원 승인 관리</a><a href="/chat">← 채팅으로 돌아가기</a></nav>
+<div class="profile"><i id="adminAvatar"></i><span><b id="adminName"></b><small>SafeMask 관리자</small></span></div></aside>
+<main><header><div><em>ACCOUNT CONTROL</em><h1>회원 승인 관리</h1><p>가입 신청을 확인하고 SafeMask 사용 권한을 안전하게 관리하세요.</p></div><a href="/chat">채팅 열기</a></header>
+<section class="summary" aria-label="회원 승인 현황">
+<button class="card active" data-status="PENDING"><span>승인 대기</span><b id="pendingCount">-</b><small>확인이 필요한 신청</small></button>
+<button class="card" data-status="APPROVED"><span>승인 완료</span><b id="approvedCount">-</b><small>현재 이용 가능</small></button>
+<button class="card" data-status="REJECTED"><span>승인 거절</span><b id="rejectedCount">-</b><small>이용이 제한된 계정</small></button></section>
+<section class="panel"><div class="toolbar"><div><h2 id="listTitle">승인 대기 회원</h2><p>가입 신청 정보와 처리 이력을 확인할 수 있습니다.</p></div>
+<form id="searchForm"><input id="keywordInput" type="search" aria-label="회원 검색" placeholder="이름, 사번, 이메일, 부서 검색"><button>검색</button></form></div>
+<p id="feedback" role="status" hidden></p><div class="table"><table><thead><tr><th>회원</th><th>사번</th><th>부서</th><th>신청일</th><th>상태</th><th>관리</th></tr></thead><tbody id="memberTableBody"></tbody></table>
+<div id="emptyState" class="empty" hidden><i>✓</i><b>표시할 회원이 없습니다.</b><span>검색 조건이나 다른 승인 상태를 확인해 보세요.</span></div></div>
+<nav id="pagination" class="pages" aria-label="회원 목록 페이지"></nav></section></main></div>
+<div id="confirmModal" class="modal" hidden><div data-close-modal></div><section role="dialog" aria-modal="true" aria-labelledby="confirmTitle"><i>✓</i><h2 id="confirmTitle"></h2><p id="confirmMessage"></p><footer><button id="cancelButton">취소</button><button id="confirmButton">확인</button></footer></section></div>
+<script th:src="@{/js/admin.js}"></script></body></html>

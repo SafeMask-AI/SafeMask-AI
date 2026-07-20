@@ -693,6 +693,101 @@ body.login-page {
 	display: none;
 }
 
+.login-message.success {
+	padding: 10px 12px;
+	border-radius: 9px;
+	background: #eaf7f0;
+	color: #267452;
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+/* 로그인 결과에서 이동하는 독립 계정 상태 화면입니다. */
+.account-status-page {
+	min-height: 100vh;
+	display: grid;
+	place-items: center;
+	padding: 24px;
+	background:
+		radial-gradient(circle at 15% 15%, rgba(244, 175, 209, 0.28), transparent 34%),
+		linear-gradient(145deg, #fffafd, #fdf1f7);
+}
+
+.account-status-card {
+	width: min(480px, 100%);
+	padding: 42px 38px 34px;
+	border: 1px solid rgba(255, 255, 255, 0.88);
+	border-radius: 24px;
+	background: rgba(255, 255, 255, 0.96);
+	box-shadow: 0 24px 70px rgba(83, 55, 69, 0.16);
+	text-align: center;
+}
+
+.account-status-card .login-logo {
+	margin-bottom: 20px;
+}
+
+.account-status-mark {
+	display: grid;
+	place-items: center;
+	width: 64px;
+	height: 64px;
+	margin: 0 auto 20px;
+	border-radius: 22px;
+	background: linear-gradient(145deg, #fff0f8, #fbd8e9);
+	color: #e5147e;
+	font-size: 27px;
+	font-weight: 900;
+}
+
+.account-status-card.is-rejected .account-status-mark {
+	background: #fff0f1;
+	color: #c94545;
+}
+
+.account-status-card h1 {
+	margin: 0 0 12px;
+	font-size: 26px;
+	color: #33252c;
+}
+
+.account-status-card > p {
+	margin: 0 auto 27px;
+	max-width: 350px;
+	color: #7f6d76;
+	font-size: 14px;
+	line-height: 1.75;
+}
+
+.account-status-actions {
+	display: grid;
+	gap: 10px;
+}
+
+.account-status-actions a {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 46px;
+	border-radius: 12px;
+	font-size: 14px;
+	font-weight: 800;
+	text-decoration: none;
+}
+
+.account-status-actions .primary {
+	background: linear-gradient(135deg, #f0369a, #e5147e);
+	color: #fff;
+}
+
+.account-status-help {
+	margin-top: 22px;
+	padding-top: 18px;
+	border-top: 1px solid #f3e7ed;
+	color: #a18f98;
+	font-size: 12px;
+}
+
 .login-submit {
 	height: 46px;
 	margin-top: 0;

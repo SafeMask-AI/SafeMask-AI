@@ -66,7 +66,8 @@ public class SecurityConfig {
 				// 회원가입·로그인·토큰 갱신은 토큰이 없는 상태에서 호출되므로 허용합니다.
 				.requestMatchers("/api/auth/**").permitAll()
 				// Thymeleaf 화면(로그인/회원가입)과 정적 리소스 (필요 시 경로 추가)
-				.requestMatchers("/", "/login", "/signup", "/chat", "/css/**", "/js/**", "/images/**",
+				.requestMatchers("/", "/login", "/signup", "/account/pending", "/account/rejected",
+					"/chat", "/admin", "/css/**", "/js/**", "/images/**",
 					"/favicon.ico", "/error").permitAll()
 				// 관리자 전용 API
 				.requestMatchers("/api/admin/**").hasRole("ADMIN")

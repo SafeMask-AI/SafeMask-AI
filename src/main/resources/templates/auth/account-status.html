@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title th:text="|${statusTitle} - SafeMask|">계정 상태 - SafeMask</title>
+	<link rel="stylesheet" th:href="@{/css/auth.css}">
+</head>
+<body>
+<main class="account-status-page">
+	<section class="account-status-card" th:classappend="${rejected} ? ' is-rejected'" aria-labelledby="statusTitle">
+		<img th:src="@{/images/login-haetae-logo.jpg}" alt="해태" class="login-logo">
+		<span class="account-status-mark" aria-hidden="true" th:text="${rejected} ? '!' : '…'">…</span>
+		<p class="login-eyebrow" th:text="${rejected} ? '계정 사용 안내' : '가입 승인 진행 중'">가입 승인 진행 중</p>
+		<h1 id="statusTitle" th:text="${statusTitle}">아직 승인 대기 중입니다</h1>
+		<p th:text="${statusMessage}">관리자가 가입 신청을 확인하고 있습니다.</p>
+		<div class="account-status-actions">
+			<a class="primary" th:href="@{/login}">처음으로 돌아가기</a>
+		</div>
+		<div class="account-status-help">계정 문의는 IT 개발팀으로 문의해 주세요.</div>
+	</section>
+</main>
+</body>
+</html>

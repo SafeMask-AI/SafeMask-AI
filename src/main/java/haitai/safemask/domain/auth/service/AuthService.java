@@ -10,6 +10,7 @@ import haitai.safemask.domain.auth.dto.TokenRefreshResult;
 import haitai.safemask.domain.auth.entity.RefreshToken;
 import haitai.safemask.domain.auth.repository.RefreshTokenRepository;
 import haitai.safemask.domain.member.entity.Member;
+import haitai.safemask.domain.member.enums.MemberApprovalStatus;
 import haitai.safemask.domain.member.repository.MemberRepository;
 import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
@@ -26,7 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * 인증 흐름 요약:
  * 1. 회원가입: 사번/이메일 중복 확인(단계별 API) → 최종 가입(비밀번호 BCrypt 해싱 후 저장)
- * 2. 로그인: 사번 조회 + 비밀번호 대조 → Access Token(JWT) + Refresh Token(UUID, DB 저장) 발급
+ * 2. 로그인: 자격 증명과 관리자 승인 확인 → Access Token(JWT) + Refresh Token(UUID, DB 저장) 발급
  * 3. 갱신: Refresh Token 검증 → 새 Access/Refresh Token 발급 (기존 Refresh Token 폐기 = rotation)
  * 4. 로그아웃: DB의 Refresh Token 삭제로 즉시 무효화
  */
@@ -116,6 +117,7 @@ public class AuthService {
 		if (!passwordEncoder.matches(request.password(), member.getPassword())) {
 			throw new CustomException(ErrorCode.LOGIN_FAILED);
 		}
+		validateApproved(member);
 
 		String accessToken = jwtTokenProvider.createAccessToken(member.getId());
 		String refreshToken = issueRefreshToken(member);
@@ -143,6 +145,7 @@ public class AuthService {
 		}
 
 		Member member = stored.getMember();
+		validateApproved(member);
 
 		String newAccessToken = jwtTokenProvider.createAccessToken(member.getId());
 		// issueRefreshToken 내부에서 기존 토큰을 모두 삭제한 뒤 새로 발급합니다.
@@ -182,5 +185,14 @@ public class AuthService {
 
 		refreshTokenRepository.save(new RefreshToken(tokenValue, member, expiresAt));
 		return tokenValue;
+	}
+
+	private void validateApproved(Member member) {
+		if (member.getApprovalStatus() == MemberApprovalStatus.PENDING) {
+			throw new CustomException(ErrorCode.APPROVAL_PENDING);
+		}
+		if (member.getApprovalStatus() == MemberApprovalStatus.REJECTED) {
+			throw new CustomException(ErrorCode.APPROVAL_REJECTED);
+		}
 	}
 }

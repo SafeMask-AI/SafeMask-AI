@@ -7,7 +7,7 @@
  * 3단계 이름/부서 → 입력값만 검증
  * 4단계 비밀번호 → POST /api/auth/signup 으로 최종 가입
  *
- * 가입 성공 시 로그인 화면으로 이동합니다. (자동 로그인 없음)
+ * 가입 성공 시 승인 대기 안내가 있는 로그인 화면으로 이동합니다. (자동 로그인 없음)
  */
 (function () {
 	let currentStep = 1;
@@ -239,9 +239,8 @@
 				return;
 			}
 
-			// 가입 성공 → 로그인 화면으로 이동해 정상 로그인 흐름을 태웁니다.
-			alert('회원가입이 완료되었습니다. 로그인해 주세요.');
-			window.location.href = '/login';
+			// 신규 계정에는 토큰을 발급하지 않고 관리자 승인 대기 상태를 안내합니다.
+			window.location.href = '/login?signup=complete';
 		} catch (e) {
 			showError(4, '서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.');
 		} finally {

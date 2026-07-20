@@ -41,6 +41,7 @@ class SecurityAsyncDispatchTest {
 		when(tokenProvider.validateToken("valid-token")).thenReturn(true);
 		when(tokenProvider.getMemberIdFromToken("valid-token")).thenReturn(1L);
 		when(memberRepository.findById(1L)).thenReturn(Optional.of(member));
+		when(member.isApproved()).thenReturn(true);
 		when(member.getRole()).thenReturn(MemberRole.USER);
 
 		context = new AnnotationConfigWebApplicationContext();

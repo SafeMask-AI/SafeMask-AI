@@ -160,6 +160,29 @@ body.modal-open .sidebar {
 	background: var(--brand-pink-dark);
 }
 
+.admin-menu-link {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	margin-top: 10px;
+	padding: 11px 12px;
+	border: 1px solid var(--pink-border);
+	border-radius: 11px;
+	background: #ffffff;
+	color: var(--brand-pink-dark);
+	font-size: 13px;
+	font-weight: 800;
+	text-decoration: none;
+}
+
+.admin-menu-link[hidden] {
+	display: none;
+}
+
+.admin-menu-link:hover {
+	background: var(--pink-soft);
+}
+
 /* 최근 대화 목록 */
 .recent-label {
 	font-size: 11px;
