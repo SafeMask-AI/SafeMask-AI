@@ -1,5 +1,6 @@
 package haitai.safemask.global.jwt;
 
+import haitai.safemask.domain.member.entity.Member;
 import haitai.safemask.domain.member.repository.MemberRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -18,7 +19,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * 동작 흐름:
  * 1. "Authorization: Bearer {token}" 헤더에서 토큰을 꺼낸다.
  * 2. 토큰의 서명/만료를 검증하고 memberId를 추출한다.
- * 3. DB에서 회원을 조회해 SecurityContext에 인증 객체를 등록한다.
+ * 3. DB에서 현재도 승인된 회원인지 확인해 SecurityContext에 인증 객체를 등록한다.
  *
  * 토큰이 없거나 유효하지 않으면 예외를 던지지 않고 SecurityContext를 비운 채
  * 다음 필터로 넘깁니다. 이후 SecurityConfig의 AuthenticationEntryPoint가
@@ -50,11 +51,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 					Long memberId = jwtTokenProvider.getMemberIdFromToken(token);
 
 					// 토큰 발급 이후 회원이 삭제됐을 수 있으므로 매 요청마다 DB에서 확인합니다.
-					memberRepository.findById(memberId).ifPresent(member -> {
+					memberRepository.findById(memberId).filter(Member::isApproved).ifPresent(member -> {
 						// Spring Security의 hasRole("ADMIN") 검사는 "ROLE_" 접두사를 기준으로 동작합니다.
 						List<SimpleGrantedAuthority> authorities =
 							List.of(new SimpleGrantedAuthority("ROLE_" + member.getRole().name()));
 
+						// 승인 취소는 DB 상태를 매 요청 다시 확인하므로 기존 Access Token에도 즉시 반영됩니다.
 						// principal에 Member 엔티티를 담아, 컨트롤러에서
 						// @AuthenticationPrincipal Member로 현재 로그인 회원을 바로 꺼낼 수 있게 합니다.
 						UsernamePasswordAuthenticationToken authentication =

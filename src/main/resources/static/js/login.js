@@ -2,7 +2,7 @@
  * 로그인 화면 스크립트입니다.
  *
  * 폼 제출 시 POST /api/auth/login 을 호출하고,
- * 성공하면 발급받은 Access/Refresh Token을 localStorage에 저장한 뒤
+ * 성공하면 Access Token과 화면 표시 정보를 선택한 브라우저 저장소에 보관한 뒤
  * 메인 화면으로 이동합니다.
  *
  * 이후 API 호출 시에는 저장된 accessToken을
@@ -43,6 +43,12 @@
 	const signupCard = document.getElementById('signupCard');
 	const showSignupButton = document.getElementById('showSignupButton');
 	const showLoginLink = document.getElementById('showLoginLink');
+	if (new URLSearchParams(window.location.search).get('signup') === 'complete') {
+		message.textContent = '가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.';
+		message.classList.remove('error');
+		message.classList.add('success');
+		window.history.replaceState({}, '', '/login');
+	}
 
 	(async function redirectIfRefreshable() {
 		if (!rememberLoginEnabled()) {
@@ -115,6 +121,8 @@
 		// 폼 기본 제출(페이지 새로고침)을 막고 fetch로 처리합니다.
 		event.preventDefault();
 		message.textContent = '';
+		message.classList.remove('success');
+		message.classList.add('error');
 
 		const loginId = document.getElementById('loginId').value.trim();
 		const password = document.getElementById('password').value;
@@ -137,7 +145,13 @@
 			if (!response.ok) {
 				// 서버의 ErrorResponse 형식({code, message, ...})에서 메시지를 꺼내 보여줍니다.
 				const error = await response.json().catch(() => null);
-				message.textContent = (error && error.message) || '로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.';
+				if (error && error.code === 'AUTH_403_1') {
+					window.location.href = '/account/pending';
+				} else if (error && error.code === 'AUTH_403_2') {
+					window.location.href = '/account/rejected';
+				} else {
+					message.textContent = (error && error.message) || '로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.';
+				}
 				return;
 			}
 

@@ -26,6 +26,11 @@ public enum ErrorCode {
 	EXPIRED_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH_401_3", "만료된 토큰입니다."),
 	INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH_401_4", "유효하지 않은 리프레시 토큰입니다. 다시 로그인해 주세요."),
 	EXPIRED_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH_401_5", "만료된 리프레시 토큰입니다. 다시 로그인해 주세요."),
+	APPROVAL_PENDING(HttpStatus.FORBIDDEN, "AUTH_403_1", "관리자 승인 대기 중인 계정입니다."),
+	APPROVAL_REJECTED(HttpStatus.FORBIDDEN, "AUTH_403_2", "가입 승인이 거절된 계정입니다. 관리자에게 문의해 주세요."),
+	MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "MEMBER_404_1", "회원을 찾을 수 없습니다."),
+	INVALID_APPROVAL_TRANSITION(HttpStatus.CONFLICT, "MEMBER_409_1", "이미 같은 승인 상태로 처리된 회원입니다."),
+	CANNOT_REVIEW_SELF(HttpStatus.BAD_REQUEST, "MEMBER_400_1", "관리자는 자신의 사용 권한을 변경할 수 없습니다."),
 	DUPLICATE_LOGIN_ID(HttpStatus.CONFLICT, "AUTH_409_1", "이미 사용 중인 사번입니다."),
 	DUPLICATE_EMAIL(HttpStatus.CONFLICT, "AUTH_409_2", "이미 사용 중인 이메일입니다.");
 

@@ -56,6 +56,10 @@ server:
 #   기본값은 프로젝트 내부가 아니라 OS 임시 디렉터리입니다. 운영 환경은
 #   FILE_STORAGE_PATH로 프로젝트 밖의 전용 보안 저장소를 지정하세요.
 safemask:
+  admin:
+    # 최초 설치에서 관리자 계정이 하나도 없을 때만 기존 회원 사번을 ADMIN/APPROVED로 승격합니다.
+    # 첫 관리자 생성 후에는 환경변수를 제거하세요. 기존 관리자가 있으면 이 값은 무시됩니다.
+    bootstrap-login-id: ${SAFEMASK_BOOTSTRAP_ADMIN_LOGIN_ID:}
   ai:
     model: ${SAFEMASK_AI_MODEL:gpt-5.5}
     # Responses API의 hosted web_search를 사용합니다. 요청에는 store=false를 명시해
