@@ -2688,6 +2688,17 @@ html[data-theme='dark'] .preview-sample-list {
 
 html[data-theme='dark'] .preview-sample-row {
 	border-bottom-color: #3a3138;
+	background: #332b32;
+}
+
+html[data-theme='dark'] .preview-sample-type {
+	color: #d8c8d1;
+}
+
+html[data-theme='dark'] .preview-sample-flow {
+	color: #fff7fb;
+	font-size: 14px;
+	font-weight: 900;
 }
 
 html[data-theme='dark'] .preview-prompt-editor textarea {
@@ -2752,17 +2763,50 @@ html[data-theme='dark'] .masking-detail-row {
 	background: #362e35;
 }
 
+html[data-theme='dark'] .masking-detail-row:nth-child(even) {
+	background: #302930;
+}
+
+html[data-theme='dark'] .masking-detail-row-type {
+	color: #f5eaf0;
+}
+
+html[data-theme='dark'] .masking-detail-row-value {
+	color: #fff7fb;
+	font-size: 14px;
+	font-weight: 900;
+}
+
 html[data-theme='dark'] .masking-detail-row-token {
-	background: #3a3138;
+	background: #4f263b;
+	color: #ffb8d7;
+	font-size: 14px;
+	font-weight: 900;
 }
 
 html[data-theme='dark'] .preview-detection-card {
 	border-color: #423840;
-	background: #2e262d;
+	background: #332b32;
+}
+
+html[data-theme='dark'] .preview-detection-type {
+	color: #f5eaf0;
+}
+
+html[data-theme='dark'] .preview-detection-label {
+	color: #d8c8d1;
+}
+
+html[data-theme='dark'] .preview-detection-value {
+	color: #fff7fb;
+	font-size: 14px;
+	font-weight: 850;
 }
 
 html[data-theme='dark'] .preview-detection-value.token {
-	background: #3a3138;
+	background: #4f263b;
+	color: #ffb8d7;
+	font-weight: 900;
 }
 
 /* ---- 수동 마스킹·버튼 ---- */
