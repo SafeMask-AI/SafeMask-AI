@@ -45,9 +45,10 @@ public class AdminMemberService {
 		return new AdminMemberPageResponse(
 			members.stream().map(AdminMemberResponse::from).toList(),
 			totalElements, totalPages, safePage, safeSize,
-			memberRepository.countByApprovalStatus(MemberApprovalStatus.PENDING),
-			memberRepository.countByApprovalStatus(MemberApprovalStatus.APPROVED),
-			memberRepository.countByApprovalStatus(MemberApprovalStatus.REJECTED));
+			memberRepository.count(),
+			memberRepository.countByApprovalStatusAndRoleNot(MemberApprovalStatus.PENDING, MemberRole.ADMIN),
+			memberRepository.countByApprovalStatusAndRoleNot(MemberApprovalStatus.APPROVED, MemberRole.ADMIN),
+			memberRepository.countByApprovalStatusAndRoleNot(MemberApprovalStatus.REJECTED, MemberRole.ADMIN));
 	}
 
 	@Transactional
@@ -66,6 +67,9 @@ public class AdminMemberService {
 		}
 		Member member = memberRepository.findByIdForUpdate(memberId)
 			.orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
+		if (member.getRole() == MemberRole.ADMIN) {
+			throw new CustomException(ErrorCode.CANNOT_REVIEW_ADMIN);
+		}
 		if (member.getApprovalStatus() == target) {
 			throw new CustomException(ErrorCode.INVALID_APPROVAL_TRANSITION);
 		}

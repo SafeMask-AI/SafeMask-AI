@@ -4,6 +4,8 @@ import haitai.safemask.domain.member.repository.MemberRepository;
 import haitai.safemask.global.jwt.JwtAuthenticationFilter;
 import haitai.safemask.global.jwt.JwtTokenProvider;
 import jakarta.servlet.DispatcherType;
+import jakarta.servlet.RequestDispatcher;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import org.springframework.context.annotation.Bean;
@@ -68,7 +70,7 @@ public class SecurityConfig {
 				// Thymeleaf 화면(로그인/회원가입)과 정적 리소스 (필요 시 경로 추가)
 				.requestMatchers("/", "/login", "/signup", "/account/pending", "/account/rejected",
 					"/chat", "/admin", "/css/**", "/js/**", "/images/**",
-					"/favicon.ico", "/error").permitAll()
+					"/favicon.ico", "/error", "/error/**").permitAll()
 				// 관리자 전용 API
 				.requestMatchers("/api/admin/**").hasRole("ADMIN")
 				// 그 외 모든 요청은 유효한 Access Token 필요
@@ -78,9 +80,16 @@ public class SecurityConfig {
 			// 인증 실패(토큰 없음/만료/무효) 시 401 JSON을 반환합니다.
 			// 응답 형식은 GlobalExceptionHandler의 ErrorResponse와 동일하게 맞춥니다.
 			.exceptionHandling(ex -> ex
-				.authenticationEntryPoint((request, response, authException) ->
+				.authenticationEntryPoint((request, response, authException) -> {
+					// 주소창 이동처럼 HTML을 기대하는 요청은 인증 JSON을 본문에 노출하지 않고
+					// 존재하지 않는 화면으로 처리합니다. API의 401 JSON 계약은 그대로 유지합니다.
+					if (isHtmlNavigation(request)) {
+						forwardNotFound(request, response);
+						return;
+					}
 					writeErrorResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
-						"COMMON_401", "로그인이 필요합니다.", request.getRequestURI()))
+						"COMMON_401", "로그인이 필요합니다.", request.getRequestURI());
+				})
 				// 인증은 됐지만 권한(ROLE)이 부족한 경우 403 JSON을 반환합니다.
 				.accessDeniedHandler((request, response, accessDeniedException) ->
 					writeErrorResponse(response, HttpServletResponse.SC_FORBIDDEN,
@@ -95,6 +104,21 @@ public class SecurityConfig {
 			);
 
 		return http.build();
+	}
+
+	private boolean isHtmlNavigation(HttpServletRequest request) {
+		String accept = request.getHeader("Accept");
+		return !request.getRequestURI().startsWith("/api")
+			&& ("GET".equals(request.getMethod()) || "HEAD".equals(request.getMethod()))
+			&& accept != null
+			&& accept.contains("text/html");
+	}
+
+	private void forwardNotFound(HttpServletRequest request, HttpServletResponse response)
+		throws java.io.IOException, jakarta.servlet.ServletException {
+		request.setAttribute(RequestDispatcher.ERROR_REQUEST_URI, request.getRequestURI());
+		response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+		request.getRequestDispatcher("/error/not-found").forward(request, response);
 	}
 
 	/**

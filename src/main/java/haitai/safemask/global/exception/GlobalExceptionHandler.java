@@ -1,6 +1,7 @@
 package haitai.safemask.global.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import java.util.Objects;
@@ -27,6 +28,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 public class GlobalExceptionHandler {
 
 	private static final String ERROR_VIEW = "error/error";
+	private static final String NOT_FOUND_VIEW = "error/404";
 
 	/**
 	 * 서비스에서 의도적으로 발생시킨 비즈니스 예외를 처리합니다.
@@ -35,7 +37,8 @@ public class GlobalExceptionHandler {
 	 * 개발자가 예상 가능한 예외는 CustomException으로 감싸서 던집니다.
 	 */
 	@ExceptionHandler(CustomException.class)
-	public Object handleCustomException(CustomException exception, HttpServletRequest request, Model model) {
+	public Object handleCustomException(CustomException exception, HttpServletRequest request,
+		HttpServletResponse response, Model model) {
 		ErrorCode errorCode = exception.getErrorCode();
 		String message = exception.getMessage();
 		if (errorCode.getStatus().is5xxServerError()) {
@@ -49,8 +52,8 @@ public class GlobalExceptionHandler {
 				.body(ErrorResponse.of(errorCode, message, request.getRequestURI()));
 		}
 
-		addErrorAttributes(model, errorCode, message, request.getRequestURI());
-		return ERROR_VIEW;
+		String viewName = errorCode == ErrorCode.NOT_FOUND ? NOT_FOUND_VIEW : ERROR_VIEW;
+		return renderErrorView(response, model, errorCode, message, request.getRequestURI(), viewName);
 	}
 
 	/**
@@ -63,6 +66,7 @@ public class GlobalExceptionHandler {
 	public Object handleValidationException(
 		MethodArgumentNotValidException exception,
 		HttpServletRequest request,
+		HttpServletResponse response,
 		Model model
 	) {
 		ErrorCode errorCode = ErrorCode.INVALID_REQUEST;
@@ -80,8 +84,7 @@ public class GlobalExceptionHandler {
 				.body(ErrorResponse.of(errorCode, message, request.getRequestURI()));
 		}
 
-		addErrorAttributes(model, errorCode, message, request.getRequestURI());
-		return ERROR_VIEW;
+		return renderErrorView(response, model, errorCode, message, request.getRequestURI(), ERROR_VIEW);
 	}
 
 	/**
@@ -97,6 +100,7 @@ public class GlobalExceptionHandler {
 	public Object handleParameterValidationException(
 		Exception exception,
 		HttpServletRequest request,
+		HttpServletResponse response,
 		Model model
 	) {
 		ErrorCode errorCode = ErrorCode.INVALID_REQUEST;
@@ -108,8 +112,7 @@ public class GlobalExceptionHandler {
 				.body(ErrorResponse.of(errorCode, message, request.getRequestURI()));
 		}
 
-		addErrorAttributes(model, errorCode, message, request.getRequestURI());
-		return ERROR_VIEW;
+		return renderErrorView(response, model, errorCode, message, request.getRequestURI(), ERROR_VIEW);
 	}
 
 	/**
@@ -119,7 +122,8 @@ public class GlobalExceptionHandler {
 	 * ERROR 레벨 스택트레이스로 로그를 오염시키지 않도록 앞에서 가로챕니다.
 	 */
 	@ExceptionHandler(NoResourceFoundException.class)
-	public Object handleNoResourceFound(NoResourceFoundException exception, HttpServletRequest request, Model model) {
+	public Object handleNoResourceFound(NoResourceFoundException exception, HttpServletRequest request,
+		HttpServletResponse response, Model model) {
 		ErrorCode errorCode = ErrorCode.NOT_FOUND;
 
 		if (isApiRequest(request)) {
@@ -128,8 +132,8 @@ public class GlobalExceptionHandler {
 				.body(ErrorResponse.of(errorCode, errorCode.getMessage(), request.getRequestURI()));
 		}
 
-		addErrorAttributes(model, errorCode, errorCode.getMessage(), request.getRequestURI());
-		return ERROR_VIEW;
+		return renderErrorView(response, model, errorCode, errorCode.getMessage(),
+			request.getRequestURI(), NOT_FOUND_VIEW);
 	}
 
 	/**
@@ -139,7 +143,8 @@ public class GlobalExceptionHandler {
 	 * DB 정보, 파일 경로, 내부 클래스명 등이 화면이나 JSON에 노출될 수 있기 때문입니다.
 	 */
 	@ExceptionHandler(Exception.class)
-	public Object handleUnexpectedException(Exception exception, HttpServletRequest request, Model model) {
+	public Object handleUnexpectedException(Exception exception, HttpServletRequest request,
+		HttpServletResponse response, Model model) {
 		log.error("Unexpected exception while handling {} {}", request.getMethod(), request.getRequestURI(), exception);
 
 		ErrorCode errorCode = ErrorCode.INTERNAL_SERVER_ERROR;
@@ -150,8 +155,8 @@ public class GlobalExceptionHandler {
 				.body(ErrorResponse.of(errorCode, errorCode.getMessage(), request.getRequestURI()));
 		}
 
-		addErrorAttributes(model, errorCode, errorCode.getMessage(), request.getRequestURI());
-		return ERROR_VIEW;
+		return renderErrorView(response, model, errorCode, errorCode.getMessage(),
+			request.getRequestURI(), ERROR_VIEW);
 	}
 
 	/**
@@ -193,5 +198,13 @@ public class GlobalExceptionHandler {
 		model.addAttribute("code", errorCode.getCode());
 		model.addAttribute("message", message);
 		model.addAttribute("path", path);
+	}
+
+	/** 화면 오류도 본문만 바꾸는 200 응답이 되지 않도록 실제 HTTP 상태를 함께 적용합니다. */
+	private String renderErrorView(HttpServletResponse response, Model model, ErrorCode errorCode,
+		String message, String path, String viewName) {
+		response.setStatus(errorCode.getStatus().value());
+		addErrorAttributes(model, errorCode, message, path);
+		return viewName;
 	}
 }

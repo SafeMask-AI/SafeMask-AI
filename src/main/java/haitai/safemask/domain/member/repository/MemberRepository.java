@@ -37,7 +37,7 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 		               m.ROLE, m.APPROVAL_STATUS, m.REVIEWED_BY_MEMBER_ID,
 		               m.REVIEWED_BY_NAME, m.REVIEWED_AT, m.CREATED_AT, m.UPDATED_AT
 		        FROM MASK_MEMBER m
-		        WHERE (:status IS NULL OR m.APPROVAL_STATUS = :status)
+		        WHERE (:status IS NULL OR (m.ROLE <> 'ADMIN' AND m.APPROVAL_STATUS = :status))
 		          AND (:keyword IS NULL
 		            OR LOWER(m.LOGIN_ID) LIKE LOWER('%' || :keyword || '%')
 		            OR LOWER(m.NAME) LIKE LOWER('%' || :keyword || '%')
@@ -55,7 +55,7 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 	@Query(value = """
 		SELECT COUNT(*)
 		FROM MASK_MEMBER m
-		WHERE (:status IS NULL OR m.APPROVAL_STATUS = :status)
+		WHERE (:status IS NULL OR (m.ROLE <> 'ADMIN' AND m.APPROVAL_STATUS = :status))
 		  AND (:keyword IS NULL
 		    OR LOWER(m.LOGIN_ID) LIKE LOWER('%' || :keyword || '%')
 		    OR LOWER(m.NAME) LIKE LOWER('%' || :keyword || '%')
@@ -64,7 +64,8 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 		""", nativeQuery = true)
 	long countSearchResults(@Param("status") String status, @Param("keyword") String keyword);
 
-	long countByApprovalStatus(MemberApprovalStatus status);
+	/** 관리자는 승인 상태 관리 대상이 아니므로 상태 카드 집계에서 제외합니다. */
+	long countByApprovalStatusAndRoleNot(MemberApprovalStatus status, MemberRole role);
 
 	long countByRole(MemberRole role);
 

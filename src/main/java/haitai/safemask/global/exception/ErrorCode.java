@@ -35,6 +35,7 @@ public enum ErrorCode {
 	MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "MEMBER_404_1", "회원을 찾을 수 없습니다."),
 	INVALID_APPROVAL_TRANSITION(HttpStatus.CONFLICT, "MEMBER_409_1", "이미 같은 승인 상태로 처리된 회원입니다."),
 	CANNOT_REVIEW_SELF(HttpStatus.BAD_REQUEST, "MEMBER_400_1", "관리자는 자신의 사용 권한을 변경할 수 없습니다."),
+	CANNOT_REVIEW_ADMIN(HttpStatus.BAD_REQUEST, "MEMBER_400_2", "관리자 계정의 사용 승인 상태는 변경할 수 없습니다."),
 	DUPLICATE_LOGIN_ID(HttpStatus.CONFLICT, "AUTH_409_1", "이미 사용 중인 사번입니다."),
 	DUPLICATE_EMAIL(HttpStatus.CONFLICT, "AUTH_409_2", "이미 사용 중인 이메일입니다.");
 
