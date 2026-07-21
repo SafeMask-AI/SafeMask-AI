@@ -8,6 +8,7 @@ import haitai.safemask.domain.chatmessage.dto.ChatCancelResponse;
 import haitai.safemask.domain.chatmessage.dto.ChatSendRequest;
 import haitai.safemask.domain.chatmessage.dto.ChatSendResponse;
 import haitai.safemask.domain.chatmessage.dto.ManualMaskRequest;
+import haitai.safemask.domain.chatmessage.approval.MaskingApprovalService;
 import haitai.safemask.domain.chatmessage.service.ChatMessageService;
 import haitai.safemask.domain.chatmessage.service.ChatMessageStreamService;
 import haitai.safemask.domain.chatmessage.service.MaskingPreviewDownloadService;
@@ -42,6 +43,7 @@ public class ChatMessageController {
 	private final ChatMessageService chatMessageService;
 	private final ChatMessageStreamService chatMessageStreamService;
 	private final MaskingPreviewDownloadService maskingPreviewDownloadService;
+	private final MaskingApprovalService maskingApprovalService;
 	private final ObjectMapper objectMapper;
 
 	@PostMapping
@@ -66,13 +68,13 @@ public class ChatMessageController {
 	@PostMapping(value = "/with-files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
 	public ResponseEntity<ChatSendResponse> sendWithFiles(@AuthenticationPrincipal Member member,
 		@RequestParam(required = false) Long chatRoomId,
-		@RequestParam String content,
-		@RequestParam(defaultValue = "false") Boolean approved,
+		@RequestParam(required = false, defaultValue = "") String content,
+		@RequestParam(required = false) String approvalId,
 		@RequestParam(defaultValue = "[]") String manualMasks,
 		@RequestPart(value = "files", required = false) List<MultipartFile> files) {
 
 		List<ManualMaskRequest> masks = parseManualMasks(manualMasks);
-		ChatSendRequest request = new ChatSendRequest(chatRoomId, content, approved, masks);
+		ChatSendRequest request = new ChatSendRequest(chatRoomId, content, approvalId, masks);
 		return ResponseEntity.ok(chatMessageService.sendWithFiles(member, request, files));
 	}
 
@@ -80,11 +82,11 @@ public class ChatMessageController {
 		produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	public ResponseEntity<SseEmitter> sendWithFilesStream(@AuthenticationPrincipal Member member,
 		@RequestParam(required = false) Long chatRoomId,
-		@RequestParam String content,
-		@RequestParam(defaultValue = "false") Boolean approved,
+		@RequestParam(required = false, defaultValue = "") String content,
+		@RequestParam(required = false) String approvalId,
 		@RequestParam(defaultValue = "[]") String manualMasks,
 		@RequestPart(value = "files", required = false) List<MultipartFile> files) {
-		ChatSendRequest request = new ChatSendRequest(chatRoomId, content, approved, parseManualMasks(manualMasks));
+		ChatSendRequest request = new ChatSendRequest(chatRoomId, content, approvalId, parseManualMasks(manualMasks));
 		return streamResponse(chatMessageStreamService.sendWithFiles(member, request, files));
 	}
 
@@ -99,6 +101,14 @@ public class ChatMessageController {
 	public ResponseEntity<ChatCancelResponse> cancelRun(@AuthenticationPrincipal Member member,
 		@PathVariable Long aiRunId) {
 		return ResponseEntity.ok(new ChatCancelResponse(chatMessageStreamService.cancel(member, aiRunId)));
+	}
+
+	/** 사용자가 미리보기를 취소하거나 다시 수정할 때 대기 중인 원문 스냅샷을 즉시 파기합니다. */
+	@DeleteMapping("/previews/{approvalId}")
+	public ResponseEntity<Void> discardPreview(@AuthenticationPrincipal Member member,
+		@PathVariable String approvalId) {
+		maskingApprovalService.discard(member, approvalId);
+		return ResponseEntity.noContent().build();
 	}
 
 	@PostMapping(value = "/preview-download", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

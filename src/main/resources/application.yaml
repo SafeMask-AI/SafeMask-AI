@@ -70,6 +70,10 @@ safemask:
     sse-timeout: ${AI_SSE_TIMEOUT:210s}
   masking:
     mapping-ttl: ${MASKING_MAPPING_TTL:24h}
+    # 미리보기 승인 ID와 승인 스냅샷의 유효시간. 만료되면 다시 검사해야 합니다.
+    approval-ttl: ${MASKING_APPROVAL_TTL:15m}
+    # 취소 요청 없이 닫힌 브라우저의 만료 빈 채팅방·Redis 매핑 정리 주기.
+    preview-cleanup-interval: ${MASKING_PREVIEW_CLEANUP_INTERVAL:5m}
   storage:
     base-path: ${FILE_STORAGE_PATH:${java.io.tmpdir}/safemask/files}
   pdf:

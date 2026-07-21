@@ -5,9 +5,9 @@ import haitai.safemask.domain.maskingentity.enums.MaskingType;
 /**
  * "원본값 ↔ 마스킹 토큰" 매핑을 채팅방 단위로 보관하는 저장소입니다.
  *
- * <p>이 매핑은 SafeMask에서 원본 민감정보가 존재할 수 있는 유일한 임시 저장소이며,
- * DB에는 절대 저장하지 않습니다. 구현체(Redis)는 TTL로 보관 기간을 제한해
- * 대화가 끝나면 원본값이 자동 소멸하도록 합니다. (개인정보 최소보관 원칙)
+	 * <p>이 저장소는 AI 응답 원복에 필요한 값-토큰 대응 관계만 Redis에 임시 보관합니다.
+	 * 최종 전송된 사용자 메시지와 첨부 원본은 사내 DB·파일 저장소의 별도 보존 정책을
+	 * 따르며, 이 매핑 자체는 DB에 중복 저장하지 않습니다.
  */
 public interface TokenMappingStore {
 

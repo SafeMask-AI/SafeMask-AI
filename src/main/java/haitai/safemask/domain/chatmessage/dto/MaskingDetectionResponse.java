@@ -6,8 +6,8 @@ import haitai.safemask.domain.maskingentity.enums.MaskingType;
 /**
  * 화면 미리보기용 탐지 정보입니다.
  *
- * <p>보안상 원본값은 내려주지 않습니다. 화면은 원문(content)과 위치 정보로
- * 하이라이트를 만들고, 서버는 감사 기록에 원본 없이 token/type/위치만 저장합니다.
+	 * <p>previewValue는 로그인한 요청 사용자가 승인할 수 있도록 해당 탐지 원문을 내려줍니다.
+	 * 외부 AI에는 전달하지 않으며, MaskingEntity 감사 기록에는 token/type/위치만 저장합니다.
  */
 public record MaskingDetectionResponse(
 	MaskingType type,

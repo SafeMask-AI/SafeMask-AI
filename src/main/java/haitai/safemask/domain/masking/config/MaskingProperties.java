@@ -25,4 +25,10 @@ public class MaskingProperties {
 	 * 만료되면 해당 방의 기존 토큰은 더 이상 원복할 수 없습니다.
 	 */
 	private Duration mappingTtl = Duration.ofHours(24);
+
+	/**
+	 * 사용자가 확인한 미리보기 원문·마스킹 결과를 승인 대기 상태로 보관하는 시간입니다.
+	 * 장시간 원문을 중복 보관하지 않으면서 일반적인 검토 시간을 허용하도록 기본 15분으로 둡니다.
+	 */
+	private Duration approvalTtl = Duration.ofMinutes(15);
 }

@@ -9,6 +9,7 @@ public record ChatSendResponse(
 	Long chatRoomId,
 	Long userMessageId,
 	Long assistantMessageId,
+	String approvalId,
 	boolean previewRequired,
 	boolean temporaryChatRoom,
 	String assistantContent,
@@ -18,16 +19,16 @@ public record ChatSendResponse(
 	/** AI가 이번 응답에서 생성한 다운로드 파일 목록 (없으면 빈 리스트) */
 	List<GeneratedFileResponse> generatedFiles
 ) {
-	public static ChatSendResponse preview(Long chatRoomId, boolean temporaryChatRoom, String maskedPreview,
+	public static ChatSendResponse preview(Long chatRoomId, String approvalId, boolean temporaryChatRoom, String maskedPreview,
 		Map<MaskingType, Long> summary, List<MaskingDetectionResponse> detections) {
-		return new ChatSendResponse(chatRoomId, null, null, true, temporaryChatRoom, null, maskedPreview, summary, detections,
+		return new ChatSendResponse(chatRoomId, null, null, approvalId, true, temporaryChatRoom, null, maskedPreview, summary, detections,
 			List.of());
 	}
 
 	public static ChatSendResponse completed(Long chatRoomId, Long userMessageId, Long assistantMessageId,
 		String assistantContent, Map<MaskingType, Long> summary, List<MaskingDetectionResponse> detections,
 		List<GeneratedFileResponse> generatedFiles) {
-		return new ChatSendResponse(chatRoomId, userMessageId, assistantMessageId, false, false, assistantContent,
+		return new ChatSendResponse(chatRoomId, userMessageId, assistantMessageId, null, false, false, assistantContent,
 			null, summary, detections, generatedFiles);
 	}
 }
