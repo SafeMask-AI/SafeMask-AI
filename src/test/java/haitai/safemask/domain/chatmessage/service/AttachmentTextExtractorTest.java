@@ -124,6 +124,15 @@ class AttachmentTextExtractorTest {
 	}
 
 	@Test
+	@DisplayName("내용이 비어 있는 텍스트 파일은 검사 0건으로 오인하지 않고 거절한다")
+	void blankTextFileRejected() {
+		assertThatThrownBy(() -> extractor.extract(List.of(new MockMultipartFile(
+			"files", "blank.txt", "text/plain", "   \n\t".getBytes(StandardCharsets.UTF_8)))))
+			.isInstanceOf(CustomException.class)
+			.hasMessageContaining("텍스트를 찾지 못했습니다");
+	}
+
+	@Test
 	@DisplayName("허용 개수를 초과한 첨부 파일은 처리하지 않는다")
 	void rejectsTooManyFiles() {
 		List<MultipartFile> files = List.of(

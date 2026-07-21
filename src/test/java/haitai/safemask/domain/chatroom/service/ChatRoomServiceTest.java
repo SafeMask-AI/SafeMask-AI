@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import haitai.safemask.domain.chatmessage.repository.ChatMessageRepository;
+import haitai.safemask.domain.chatmessage.approval.MaskingApprovalService;
 import haitai.safemask.domain.chatroom.entity.ChatRoom;
 import haitai.safemask.domain.chatroom.enums.ChatRoomStatus;
 import haitai.safemask.domain.chatroom.repository.ChatRoomRepository;
@@ -22,14 +23,16 @@ class ChatRoomServiceTest {
 	private ChatMessageRepository chatMessageRepository;
 	private MaskingService maskingService;
 	private ChatRoomService chatRoomService;
+	private MaskingApprovalService maskingApprovalService;
 
 	@BeforeEach
 	void setUp() {
 		chatRoomRepository = mock(ChatRoomRepository.class);
 		chatMessageRepository = mock(ChatMessageRepository.class);
 		maskingService = mock(MaskingService.class);
+		maskingApprovalService = mock(MaskingApprovalService.class);
 		chatRoomService = new ChatRoomService(chatRoomRepository, chatMessageRepository, maskingService,
-			mock(FileAssetService.class));
+			mock(FileAssetService.class), maskingApprovalService);
 	}
 
 	@Test
@@ -45,6 +48,7 @@ class ChatRoomServiceTest {
 		chatRoomService.discardEmptyPreview(member, 23L);
 
 		verify(maskingService).clearMappings(23L);
+		verify(maskingApprovalService).discardForRoom(member, 23L);
 		verify(chatRoomRepository).delete(chatRoom);
 	}
 
@@ -61,6 +65,7 @@ class ChatRoomServiceTest {
 		chatRoomService.discardEmptyPreview(member, 23L);
 
 		verify(maskingService, never()).clearMappings(23L);
+		verify(maskingApprovalService, never()).discardForRoom(member, 23L);
 		verify(chatRoomRepository, never()).delete(chatRoom);
 	}
 }

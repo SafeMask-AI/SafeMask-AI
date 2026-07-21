@@ -231,7 +231,9 @@
 		if (!pendingPreview) {
 			return;
 		}
-		sendMessage(true);
+		// 미리보기에서 원문이나 수동 마스킹을 바꿨다면 기존 승인 ID를 사용할 수 없다.
+		// 첫 클릭은 변경본 재검사, 갱신된 결과를 확인한 다음 클릭만 실제 승인으로 처리한다.
+		sendMessage(!pendingPreview.dirty);
 	});
 
 	previewCancelButton.addEventListener('click', function () {
@@ -239,7 +241,7 @@
 	});
 	previewEditButton.addEventListener('click', function () {
 		const content = getPreviewPromptContent();
-		clearPreviewState({ restoreAttachments: true, removePendingUserRow: true });
+		clearPreviewState({ restoreAttachments: true, removePendingUserRow: true, discardApproval: true });
 		if (content && !messageInput.value.trim()) {
 			messageInput.value = content;
 			resizeComposer();
@@ -249,6 +251,7 @@
 	previewPromptInput.addEventListener('input', function () {
 		if (pendingPreview) {
 			pendingPreview.content = getPreviewPromptContent();
+			updatePreviewDirtyState();
 		}
 		resizePreviewPromptInput();
 	});
@@ -301,13 +304,19 @@
 	});
 
 	async function sendMessage(approved) {
-		const typedContent = approved && pendingPreview ? getPreviewPromptContent() : messageInput.value.trim();
+		const previewAtStart = pendingPreview;
+		const recheckingPreview = !approved && Boolean(previewAtStart);
+		const typedContent = previewAtStart ? getPreviewPromptContent() : messageInput.value.trim();
 		const content = typedContent;
 		if ((!content && attachedFiles.length === 0) || sending) {
 			return;
 		}
+		if (approved && (!previewAtStart || !previewAtStart.approvalId)) {
+			return;
+		}
+		const approvalId = approved ? previewAtStart.approvalId : null;
 
-		if (!approved) {
+		if (!approved && !recheckingPreview) {
 			clearPreviewState({ restoreAttachments: true });
 		} else {
 			setMaskingPreviewVisible(false);
@@ -331,24 +340,25 @@
 			? `${sentFiles[0].name} 분석`
 			: `첨부 파일 ${sentFiles.length}개 분석`);
 		let questionRow = null;
-		if (!approved) {
+		if (!approved && !recheckingPreview) {
 			optimisticUserRow = appendMessage('user', content, { files: sentFiles });
 			questionRow = optimisticUserRow;
 			messageInput.value = '';
 			resizeComposer();
-		} else if (pendingPreview && pendingPreview.userRow) {
-			updateUserMessageRow(pendingPreview.userRow, content, sentFiles);
-			questionRow = pendingPreview.userRow;
-		} else if (!pendingPreview || !pendingPreview.userRow) {
+		} else if (previewAtStart && previewAtStart.userRow) {
+			updateUserMessageRow(previewAtStart.userRow, content, sentFiles);
+			questionRow = previewAtStart.userRow;
+		} else {
 			questionRow = appendMessage('user', content, { files: sentFiles });
 		}
 
-		const statusRow = appendStatusMessage(buildInitialStatus(approved, attachedFiles.length > 0));
+		const statusRow = appendStatusMessage(buildInitialStatus(approved, attachedFiles.length > 0,
+			recheckingPreview));
 		// ChatGPT처럼 방금 보낸 질문을 화면 위쪽으로 올리고, 아래 빈 공간에 답변을 채운다
 		anchorTurnToTop(questionRow);
 
 		try {
-			const response = await sendChatRequest(content, approved, requestState.controller.signal);
+			const response = await sendChatRequest(content, approvalId, requestState.controller.signal);
 			if (requestState.navigationVersion !== navigationVersion) {
 				return;
 			}
@@ -358,9 +368,11 @@
 				return;
 			}
 
-			if (!response.ok) {
-				const data = await readResponseBody(response);
-				throw new Error(data.message || '요청 처리 중 오류가 발생했습니다.');
+				if (!response.ok) {
+					const data = await readResponseBody(response);
+					const requestError = new Error(data.message || '요청 처리 중 오류가 발생했습니다.');
+					requestError.code = data.code;
+					throw requestError;
 			}
 			const data = await readChatStreamResponse(response, function (eventName, eventData) {
 				if (requestState.navigationVersion !== navigationVersion) {
@@ -388,19 +400,25 @@
 			updateRoomTitle(requestTitle);
 			loadRooms();
 
-			if (data.previewRequired) {
-				removeMessageRow(statusRow);
-				pendingPreview = {
-					content: content,
-					hasFiles: attachedFiles.length > 0,
-					userRow: optimisticUserRow,
-					temporaryChatRoom: Boolean(data.temporaryChatRoom)
-				};
+				if (data.previewRequired) {
+					removeMessageRow(statusRow);
+					pendingPreview = {
+						content: content,
+						hasFiles: attachedFiles.length > 0,
+						userRow: questionRow,
+						temporaryChatRoom: Boolean(data.temporaryChatRoom),
+						approvalId: data.approvalId,
+						approvedContent: content,
+						approvedManualMaskSignature: manualMaskSignature(),
+						dirty: false
+					};
 				if (data.temporaryChatRoom) {
 					temporaryPreviewRoomId = data.chatRoomId;
 				}
-				manualMasks = [];
-				showPreview(data);
+					showPreview(data);
+					if (recheckingPreview) {
+						setPreviewFeedback('변경한 내용을 다시 검사했습니다. 갱신된 마스킹 결과를 확인해 주세요.');
+					}
 				attachmentList.hidden = true;
 				return;
 			}
@@ -414,27 +432,30 @@
 			if (requestState.navigationVersion !== navigationVersion) {
 				return;
 			}
-			if (requestState.userCancelled) {
-				appendMessage('system', '응답 생성을 중단했습니다.');
-			} else if (error.name === 'AbortError') {
-				if (optimisticUserRow && !approved) {
+				if (requestState.userCancelled) {
+					appendMessage('system', '응답 생성을 중단했습니다.');
+				} else if (error.name === 'AbortError') {
+					if (optimisticUserRow && !approved && !recheckingPreview) {
 						removeMessageRow(optimisticUserRow);
 						messageInput.value = content;
 						resizeComposer();
 				}
-				if (!requestState.accepted && approved && pendingPreview) {
-					setMaskingPreviewVisible(true);
+					if (!requestState.accepted && previewAtStart) {
+						setMaskingPreviewVisible(true);
 					attachmentList.hidden = true;
 				}
 			} else if (requestState.accepted && error.streamReported) {
 				appendMessage('system', resolveRequestErrorMessage(error));
 			} else if (requestState.accepted) {
 				appendMessage('system', '응답 연결이 종료되어 생성을 중단했습니다. 다시 전송해 주세요.');
-			} else if (approved && pendingPreview) {
-				setMaskingPreviewVisible(true);
-				setPreviewFeedback(`${resolveRequestErrorMessage(error)} 내용을 유지했으니 다시 전송할 수 있습니다.`);
-			} else {
-				if (!requestState.accepted && optimisticUserRow && !approved) {
+				} else if (previewAtStart) {
+					// 승인 ID는 서버 처리 도중 이미 1회 소비됐을 수 있으므로 실패 후 그대로 재사용하지 않는다.
+					pendingPreview.dirty = true;
+					updatePreviewApproveButton();
+					setMaskingPreviewVisible(true);
+					setPreviewFeedback(`${resolveRequestErrorMessage(error)} 내용을 다시 검사한 뒤 전송해 주세요.`);
+				} else {
+					if (!requestState.accepted && optimisticUserRow && !approved && !recheckingPreview) {
 					removeMessageRow(optimisticUserRow);
 					messageInput.value = content;
 					resizeComposer();
@@ -552,7 +573,10 @@
 		}
 	}
 
-	function buildInitialStatus(approved, hasFiles) {
+	function buildInitialStatus(approved, hasFiles, recheckingPreview) {
+		if (recheckingPreview) {
+			return '수정한 내용의 민감정보를 다시 검사하는 중...';
+		}
 		if (approved) {
 			return '승인된 마스킹 내용을 안전하게 저장하는 중...';
 		}
@@ -1243,6 +1267,7 @@
 		setPreviewFeedback('');
 		renderPreviewDetails(data);
 		renderManualMasks();
+		updatePreviewApproveButton();
 		setMaskingPreviewVisible(true);
 	}
 
@@ -1579,6 +1604,31 @@
 		return previewPromptInput.value.trim();
 	}
 
+	function manualMaskSignature() {
+		return JSON.stringify(manualMasks.map(function (mask) {
+			return { value: mask.value, type: mask.type };
+		}));
+	}
+
+	function updatePreviewDirtyState() {
+		if (!pendingPreview) {
+			return;
+		}
+		pendingPreview.dirty = getPreviewPromptContent() !== pendingPreview.approvedContent
+			|| manualMaskSignature() !== pendingPreview.approvedManualMaskSignature;
+		updatePreviewApproveButton();
+		if (pendingPreview.dirty) {
+			setPreviewFeedback('내용이 변경되었습니다. 전송 전에 변경본을 다시 검사합니다.');
+		} else {
+			setPreviewFeedback('');
+		}
+	}
+
+	function updatePreviewApproveButton() {
+		previewApproveButton.textContent = pendingPreview && pendingPreview.dirty
+			? '변경 내용 다시 검사' : '마스킹하고 전송';
+	}
+
 	function resizePreviewPromptInput() {
 		previewPromptInput.style.height = 'auto';
 		previewPromptInput.style.height = `${Math.min(previewPromptInput.scrollHeight, 160)}px`;
@@ -1588,6 +1638,8 @@
 		const clearAttachments = Boolean(options && options.clearAttachments);
 		const restoreAttachments = !options || options.restoreAttachments !== false;
 		const removePendingUserRow = Boolean(options && options.removePendingUserRow);
+		const discardApproval = Boolean(options && options.discardApproval);
+		const approvalIdToDiscard = discardApproval && pendingPreview ? pendingPreview.approvalId : null;
 		if (removePendingUserRow && pendingPreview && pendingPreview.userRow) {
 			removeMessageRow(pendingPreview.userRow);
 		}
@@ -1600,6 +1652,7 @@
 		setPreviewFeedback('');
 		manualMaskValue.value = '';
 		pendingPreview = null;
+		updatePreviewApproveButton();
 		currentPreviewData = null;
 		currentPreviewTotalCount = 0;
 		manualMasks = [];
@@ -1609,12 +1662,15 @@
 		attachmentList.hidden = !restoreAttachments || attachedFiles.length === 0;
 		renderManualMasks();
 		renderAttachments();
+		if (approvalIdToDiscard) {
+			discardMaskingApproval(approvalIdToDiscard);
+		}
 	}
 
 	async function cancelMaskingPreview() {
 		const shouldReturnToInitial = temporaryPreviewRoomId !== null;
 		const roomIdToDiscard = temporaryPreviewRoomId;
-		clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
+		clearPreviewState({ clearAttachments: true, removePendingUserRow: true, discardApproval: true });
 		if (shouldReturnToInitial) {
 			temporaryPreviewRoomId = null;
 			currentChatRoomId = null;
@@ -1627,7 +1683,7 @@
 		messageInput.focus({ preventScroll: true });
 	}
 
-	function sendChatRequest(content, approved, signal) {
+	function sendChatRequest(content, approvalId, signal) {
 		if (attachedFiles.length === 0) {
 			return authorizedFetch('/api/chat/messages/stream', {
 				method: 'POST',
@@ -1635,11 +1691,11 @@
 					'Content-Type': 'application/json',
 					'Accept': 'text/event-stream'
 				},
-				body: JSON.stringify({
-					chatRoomId: currentChatRoomId,
-					content: content,
-					approved: approved,
-					manualMasks: approved ? manualMasks : []
+					body: JSON.stringify({
+						chatRoomId: currentChatRoomId,
+						content: approvalId ? null : content,
+						approvalId: approvalId,
+						manualMasks: approvalId ? [] : manualMasks
 				}),
 				signal: signal
 			});
@@ -1649,9 +1705,12 @@
 		if (currentChatRoomId !== null) {
 			formData.append('chatRoomId', String(currentChatRoomId));
 		}
-		formData.append('content', content);
-		formData.append('approved', String(approved));
-		formData.append('manualMasks', JSON.stringify(approved ? manualMasks : []));
+		if (approvalId) {
+			formData.append('approvalId', approvalId);
+		} else {
+			formData.append('content', content);
+		}
+		formData.append('manualMasks', JSON.stringify(approvalId ? [] : manualMasks));
 		attachedFiles.forEach(function (file) {
 			formData.append('files', file);
 		});
@@ -2009,7 +2068,7 @@
 		}
 		const historyRequest = new AbortController();
 		activeHistoryRequest = historyRequest;
-		clearPreviewState({ clearAttachments: true });
+		clearPreviewState({ clearAttachments: true, discardApproval: true });
 		hideAttachmentNotice();
 		closeSidebar();
 		autoFollowMessages = true;
@@ -2063,6 +2122,7 @@
 		});
 		manualMaskValue.value = '';
 		renderManualMasks();
+		updatePreviewDirtyState();
 	}
 
 	function renderManualMasks() {
@@ -2077,6 +2137,7 @@
 			removeButton.addEventListener('click', function () {
 				manualMasks.splice(index, 1);
 				renderManualMasks();
+				updatePreviewDirtyState();
 			});
 			item.appendChild(removeButton);
 			manualMaskList.appendChild(item);
@@ -2252,7 +2313,7 @@
 			activeHistoryRequest = null;
 		}
 		const roomIdToDiscard = temporaryPreviewRoomId;
-		clearPreviewState({ clearAttachments: true, removePendingUserRow: true });
+		clearPreviewState({ clearAttachments: true, removePendingUserRow: true, discardApproval: true });
 		currentChatRoomId = null;
 		temporaryPreviewRoomId = null;
 		autoFollowMessages = true;
@@ -2330,6 +2391,14 @@
 			// 임시 방은 최근 목록 쿼리에서도 제외되므로 화면을 오류 상태로 되돌리지 않는다.
 		} finally {
 			loadRooms();
+		}
+	}
+
+	async function discardMaskingApproval(approvalId) {
+		try {
+			await authorizedFetch(`/api/chat/messages/previews/${encodeURIComponent(approvalId)}`, { method: 'DELETE' });
+		} catch (error) {
+			// 승인 스냅샷은 짧은 TTL로 자동 만료되므로 화면 이동을 실패 처리하지 않는다.
 		}
 	}
 

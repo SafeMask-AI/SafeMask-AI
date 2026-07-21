@@ -56,8 +56,13 @@ public class AttachmentTextExtractor {
 			if (file == null || file.isEmpty()) {
 				continue;
 			}
+			String extracted = extractOne(file);
+			if (extracted.isBlank()) {
+				throw new CustomException(ErrorCode.INVALID_REQUEST,
+					"파일에서 처리할 텍스트를 찾지 못했습니다: " + file.getOriginalFilename());
+			}
 			builder.append("\n--- ").append(file.getOriginalFilename()).append(" ---\n");
-			builder.append(extractOne(file)).append("\n");
+			builder.append(extracted).append("\n");
 		}
 		return builder.toString();
 	}

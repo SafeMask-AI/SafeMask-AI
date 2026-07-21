@@ -12,6 +12,9 @@ import haitai.safemask.domain.chatmessage.dto.ChatSendRequest;
 import haitai.safemask.domain.chatmessage.dto.ChatSendResponse;
 import haitai.safemask.domain.chatmessage.dto.ManualMaskRequest;
 import haitai.safemask.domain.chatmessage.dto.MaskingDetectionResponse;
+import haitai.safemask.domain.chatmessage.approval.IssuedMaskingApproval;
+import haitai.safemask.domain.chatmessage.approval.MaskingApprovalService;
+import haitai.safemask.domain.chatmessage.approval.MaskingApprovalSnapshot;
 import haitai.safemask.domain.chatmessage.entity.ChatMessage;
 import haitai.safemask.domain.chatmessage.enums.MessageRole;
 import haitai.safemask.domain.chatmessage.repository.ChatMessageRepository;
@@ -60,6 +63,7 @@ public class ChatMessageService {
 	private final AiRunRepository aiRunRepository;
 	private final MaskingEntityRepository maskingEntityRepository;
 	private final MaskingService maskingService;
+	private final MaskingApprovalService maskingApprovalService;
 	private final AttachmentTextExtractor attachmentTextExtractor;
 	private final GeneratedFileService generatedFileService;
 	private final FileAssetService fileAssetService;
@@ -72,6 +76,7 @@ public class ChatMessageService {
 		AiRunRepository aiRunRepository,
 		MaskingEntityRepository maskingEntityRepository,
 		MaskingService maskingService,
+		MaskingApprovalService maskingApprovalService,
 		AttachmentTextExtractor attachmentTextExtractor,
 		GeneratedFileService generatedFileService,
 		FileAssetService fileAssetService,
@@ -83,6 +88,7 @@ public class ChatMessageService {
 		this.aiRunRepository = aiRunRepository;
 		this.maskingEntityRepository = maskingEntityRepository;
 		this.maskingService = maskingService;
+		this.maskingApprovalService = maskingApprovalService;
 		this.attachmentTextExtractor = attachmentTextExtractor;
 		this.generatedFileService = generatedFileService;
 		this.fileAssetService = fileAssetService;
@@ -117,9 +123,8 @@ public class ChatMessageService {
 	/**
 	 * 사용자의 채팅 입력을 처리합니다.
 	 *
-	 * <p>민감정보가 탐지됐고 사용자가 아직 승인하지 않았다면 GPT 호출 없이 미리보기만 반환합니다.
-	 * 탐지 0건이거나 approved=true인 요청은 maskedContent 기준으로 이전 대화 맥락을 구성해
-	 * GPT에 전송하고, 응답은 Redis 매핑으로 원복해 저장합니다.
+	 * <p>민감정보가 탐지되면 서버가 1회용 승인 스냅샷을 발급하고 GPT 호출 없이 미리보기만 반환합니다.
+	 * 탐지 0건은 바로 전송하며, 승인 요청은 클라이언트 원문이 아닌 서버 스냅샷의 maskedText를 사용합니다.
 	 */
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public ChatSendResponse send(Member member, ChatSendRequest request) {
@@ -133,23 +138,30 @@ public class ChatMessageService {
 
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public PreparedSend prepare(Member member, ChatSendRequest request) {
+		validateRequestObject(request);
+		if (request.hasApprovalId()) {
+			return prepareApproved(member, request, null);
+		}
 		return prepareInternal(member, request, request.content(), null);
 	}
 
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public PreparedSend prepareWithFiles(Member member, ChatSendRequest request, List<MultipartFile> files) {
+		validateRequestObject(request);
+		if (request.hasApprovalId()) {
+			return prepareApproved(member, request, files);
+		}
 		String attachmentText = attachmentTextExtractor.extract(files);
 		String baseContent = request.content() == null ? "" : request.content().trim();
 		String processingContent = (baseContent + attachmentText).trim();
 		String displayContent = buildDisplayContent(baseContent, files);
-		return prepareInternal(member, new ChatSendRequest(request.chatRoomId(), processingContent, request.approved(),
+		return prepareInternal(member, new ChatSendRequest(request.chatRoomId(), processingContent, null,
 			request.manualMasks()), displayContent, files);
 	}
 
 	private PreparedSend prepareInternal(Member member, ChatSendRequest request, String displayContent,
 		List<MultipartFile> files) {
 		validateRequest(request);
-		boolean forcePreview = files != null && !files.isEmpty();
 		boolean temporaryChatRoom = request.chatRoomId() == null;
 
 		ChatRoom chatRoom = resolveChatRoom(member, request, displayContent);
@@ -159,16 +171,48 @@ public class ChatMessageService {
 			.map(MaskingDetectionResponse::from)
 			.toList();
 
-		if ((forcePreview || maskingResult.hasDetections()) && !request.isApproved()) {
+		if (maskingResult.hasDetections()) {
+			refreshPreviewRoom(member, chatRoom, temporaryChatRoom);
+			IssuedMaskingApproval approval = maskingApprovalService.issue(member, chatRoom, temporaryChatRoom,
+				displayContent, maskingResult, request.manualMasks(), files);
 			return new PreparedSend(
-				ChatSendResponse.preview(chatRoom.getId(), temporaryChatRoom, maskingResult.maskedText(),
+				ChatSendResponse.preview(chatRoom.getId(), approval.approvalId(), temporaryChatRoom,
+					maskingResult.maskedText(),
 					maskingResult.summary(), detections),
 				null, null, null, maskingResult.summary(), detections);
 		}
 
 		// 첨부 원본은 미리보기 단계에서는 저장하지 않고, 사용자가 전송을 확정한 시점에만 보관한다.
 		// AI 호출은 이 쓰기 트랜잭션이 끝난 뒤 실행해 DB 커넥션을 오래 붙잡지 않는다.
-		InitialUserWrite write = saveApprovedUserMessage(chatRoom.getId(), displayContent, maskingResult, files);
+		InitialUserWrite write = saveApprovedUserMessage(member, chatRoom.getId(), displayContent, maskingResult, files);
+		return new PreparedSend(null, write.chatRoomId(), write.userMessageId(), write.aiRunId(),
+			maskingResult.summary(), detections);
+	}
+
+	/** 기존 빈 방에서 미리보기를 다시 검사한 시각을 남겨 만료 정리와 경합하지 않게 합니다. */
+	private void refreshPreviewRoom(Member member, ChatRoom chatRoom, boolean newlyCreatedRoom) {
+		if (newlyCreatedRoom) {
+			return;
+		}
+		writeTransaction.executeWithoutResult(status -> chatRoomRepository
+			.findByIdAndMember_IdAndStatus(chatRoom.getId(), member.getId(), ChatRoomStatus.ACTIVE)
+			.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND))
+			.touch());
+	}
+
+	/** 서버가 보관한 최신 승인 스냅샷을 원자적으로 소비해 확정 요청을 만듭니다. */
+	private PreparedSend prepareApproved(Member member, ChatSendRequest request, List<MultipartFile> files) {
+		MaskingApprovalSnapshot snapshot = maskingApprovalService.consume(member, request.approvalId(), files);
+		if (request.chatRoomId() != null && !request.chatRoomId().equals(snapshot.chatRoomId())) {
+			throw new CustomException(ErrorCode.MASKING_APPROVAL_INVALID);
+		}
+
+		MaskingResult maskingResult = snapshot.maskingResult();
+		List<MaskingDetectionResponse> detections = maskingResult.detections().stream()
+			.map(MaskingDetectionResponse::from)
+			.toList();
+		InitialUserWrite write = saveApprovedUserMessage(member, snapshot.chatRoomId(), snapshot.displayContent(),
+			maskingResult, files);
 		return new PreparedSend(null, write.chatRoomId(), write.userMessageId(), write.aiRunId(),
 			maskingResult.summary(), detections);
 	}
@@ -247,10 +291,12 @@ public class ChatMessageService {
 		return Boolean.TRUE.equals(discarded);
 	}
 
-	private InitialUserWrite saveApprovedUserMessage(Long chatRoomId, String displayContent, MaskingResult maskingResult,
+	private InitialUserWrite saveApprovedUserMessage(Member member, Long chatRoomId, String displayContent,
+		MaskingResult maskingResult,
 		List<MultipartFile> files) {
 		return writeTransaction.execute(status -> {
-			ChatRoom managedChatRoom = chatRoomRepository.findById(chatRoomId)
+			ChatRoom managedChatRoom = chatRoomRepository.findByIdAndMember_IdAndStatus(chatRoomId, member.getId(),
+					ChatRoomStatus.ACTIVE)
 				.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
 			fileAssetService.storeUploads(managedChatRoom, files);
 			ChatMessage userMessage = chatMessageRepository.save(
@@ -387,7 +433,14 @@ public class ChatMessageService {
 	}
 
 	private void validateRequest(ChatSendRequest request) {
-		if (request == null || request.content() == null || request.content().isBlank()) {
+		validateRequestObject(request);
+		if (request.content() == null || request.content().isBlank()) {
+			throw new CustomException(ErrorCode.INVALID_REQUEST);
+		}
+	}
+
+	private void validateRequestObject(ChatSendRequest request) {
+		if (request == null) {
 			throw new CustomException(ErrorCode.INVALID_REQUEST);
 		}
 	}
