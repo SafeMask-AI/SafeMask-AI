@@ -70,7 +70,13 @@ public class ChatMessageStreamService {
 
 	public boolean cancel(Member member, Long aiRunId) {
 		chatMessageService.verifyRunOwner(member, aiRunId);
-		return cancelActiveRun(aiRunId);
+		if (cancelActiveRun(aiRunId)) {
+			return true;
+		}
+		// 실행이 이미 완료돼 활성 스레드가 없더라도, 사용자가 정지를 눌렀다면 방금 저장된
+		// 답변을 받지 않겠다는 뜻이므로 저장분을 폐기한다. (연결 종료 경합으로 이미
+		// CANCELLED 처리된 경우도 성공으로 응답해 정지가 조용히 무시되지 않게 한다)
+		return chatMessageService.discardCompletedRun(aiRunId);
 	}
 
 	private boolean cancelActiveRun(Long aiRunId) {
@@ -212,15 +218,27 @@ public class ChatMessageStreamService {
 
 		private void complete() {
 			if (closed.compareAndSet(false, true)) {
-				closeAction.run();
+				runQuietly(closeAction);
 				emitter.complete();
 			}
 		}
 
 		private void disconnect() {
 			if (closed.compareAndSet(false, true)) {
-				closeAction.run();
-				disconnectAction.run();
+				runQuietly(closeAction);
+				runQuietly(disconnectAction);
+			}
+		}
+
+		/**
+		 * 세션 정리 작업의 예외가 호출자(진행 상태 전송·답변 생성 스레드)로 전파되지 않게 합니다.
+		 * 예: 취소 상태 전이가 DB 제약 등으로 실패해도 답변 파이프라인 전체를 오류로 만들지 않습니다.
+		 */
+		private static void runQuietly(Runnable action) {
+			try {
+				action.run();
+			} catch (RuntimeException e) {
+				log.warn("SSE 세션 정리 작업이 실패했습니다", e);
 			}
 		}
 	}

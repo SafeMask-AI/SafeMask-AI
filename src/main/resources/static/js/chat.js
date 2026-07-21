@@ -330,17 +330,22 @@
 		const requestTitle = content || (sentFiles.length === 1
 			? `${sentFiles[0].name} 분석`
 			: `첨부 파일 ${sentFiles.length}개 분석`);
+		let questionRow = null;
 		if (!approved) {
 			optimisticUserRow = appendMessage('user', content, { files: sentFiles });
+			questionRow = optimisticUserRow;
 			messageInput.value = '';
 			resizeComposer();
 		} else if (pendingPreview && pendingPreview.userRow) {
 			updateUserMessageRow(pendingPreview.userRow, content, sentFiles);
+			questionRow = pendingPreview.userRow;
 		} else if (!pendingPreview || !pendingPreview.userRow) {
-			appendMessage('user', content, { files: sentFiles });
+			questionRow = appendMessage('user', content, { files: sentFiles });
 		}
 
 		const statusRow = appendStatusMessage(buildInitialStatus(approved, attachedFiles.length > 0));
+		// ChatGPT처럼 방금 보낸 질문을 화면 위쪽으로 올리고, 아래 빈 공간에 답변을 채운다
+		anchorTurnToTop(questionRow);
 
 		try {
 			const response = await sendChatRequest(content, approved, requestState.controller.signal);
@@ -487,7 +492,7 @@
 			attachAssistantActions(row, body, text);
 		}
 		row.appendChild(body);
-		messageList.appendChild(row);
+		appendRowToList(row);
 		updateRegenerateVisibility();
 		scrollMessageListToBottom();
 		return row;
@@ -532,7 +537,7 @@
 
 		body.appendChild(bubble);
 		row.appendChild(body);
-		messageList.appendChild(row);
+		appendRowToList(row);
 		scrollMessageListToBottom();
 		return row;
 	}
@@ -560,10 +565,12 @@
 	function removeMessageRow(row) {
 		if (row && row.parentNode) {
 			row.parentNode.removeChild(row);
+			// 행이 사라진 만큼 앵커링용 빈 공간이 과하게 남지 않도록 줄인다
+			collapseTurnSpacerToViewport();
 		}
 	}
 
-	async function appendTypingMessage(role, text) {
+	async function appendTypingMessage(role, text, shouldCancel, shouldSkip) {
 		setChatting(true);
 
 		const row = document.createElement('div');
@@ -576,22 +583,24 @@
 		bubble.className = 'message-bubble';
 		body.appendChild(bubble);
 		row.appendChild(body);
-		messageList.appendChild(row);
+		appendRowToList(row);
 
-		await typeTextIntoBubble(bubble, text);
+		await typeTextIntoBubble(bubble, text, shouldCancel, shouldSkip);
 		if (role === 'assistant') {
-			// 타이핑 연출은 원문으로 하고, 끝나면 서식 있는 마크다운 화면으로 전환
+			// 연출이 끝나면(건너뛰기 포함) 전체 텍스트로 한 번 더 렌더링해 마무리한다
 			renderAssistantBubble(bubble, text);
 			attachGeneratedFileCards(body, text);
 			attachAssistantActions(row, body, text);
 			updateRegenerateVisibility();
 		}
 		scrollMessageListToBottom();
+		// 답변이 끝났으므로 앵커링용 빈 공간 중 화면 밖 여백은 정리한다
+		collapseTurnSpacerToViewport();
 	}
 
-	async function replaceStatusWithTypingMessage(row, text, shouldCancel) {
+	async function replaceStatusWithTypingMessage(row, text, shouldCancel, shouldSkip) {
 		if (!row) {
-			await appendTypingMessage('assistant', text);
+			await appendTypingMessage('assistant', text, shouldCancel, shouldSkip);
 			return;
 		}
 
@@ -599,64 +608,64 @@
 		const body = row.querySelector('.message-body');
 		const statusBubble = row.querySelector('.message-bubble');
 		if (!body || !statusBubble) {
-			await appendTypingMessage('assistant', text);
+			await appendTypingMessage('assistant', text, shouldCancel, shouldSkip);
 			return;
 		}
 
 		const bubble = document.createElement('div');
 		bubble.className = 'message-bubble';
 		body.replaceChild(bubble, statusBubble);
-		await typeTextIntoBubble(bubble, text, shouldCancel);
-		// 타이핑 연출은 원문으로 하고, 끝나면 서식 있는 마크다운 화면으로 전환
+		await typeTextIntoBubble(bubble, text, shouldCancel, shouldSkip);
+		// 연출이 끝나면(건너뛰기 포함) 전체 텍스트로 한 번 더 렌더링해 마무리한다
 		renderAssistantBubble(bubble, text);
 		attachGeneratedFileCards(body, text);
 		attachAssistantActions(row, body, text);
 		updateRegenerateVisibility();
 		scrollMessageListToBottom();
+		// 답변이 끝났으므로 앵커링용 빈 공간 중 화면 밖 여백은 정리한다
+		collapseTurnSpacerToViewport();
 	}
 
-	async function typeTextIntoBubble(bubble, text, shouldCancel) {
+	async function typeTextIntoBubble(bubble, text, shouldCancel, shouldSkip) {
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			bubble.textContent = text;
 			return;
 		}
-		// 답변은 서버에서 전체 원복·검증된 뒤 도착한다. 실제 생성 시간처럼 오래 끌지 않고
-		// 길이에 따라 8~48자씩 빠르게 펼쳐, 완료된 결과라는 사실과 읽기 흐름을 함께 보존한다.
-		const chunkSize = Math.max(8, Math.min(48, Math.ceil(text.length / 70)));
-		const baseDelay = 12;
-		bubble.classList.add('markdown');
+		// 답변은 서버에서 전체 원복·검증된 뒤 도착하지만, 화면에서는 ChatGPT처럼
+		// 사용자가 읽으면서 따라 내려갈 수 있는 속도로 펼친다. 짧은 답변은 틱당 1자
+		// (약 33자/초)로 또박또박 찍고, 긴 답변은 연출이 하염없이 길어지지 않도록
+		// 길이에 비례해 틱당 글자 수를 늘려 전체 연출 시간을 15초 안팎으로 제한한다.
+		const chunkSize = Math.max(1, Math.min(24, Math.ceil(text.length / 500)));
+		const baseDelay = 30;
+		// ChatGPT처럼 매 틱 "지금까지 보이는 텍스트 전체"를 마크다운으로 렌더링한다.
+		// 굵게(**)·코드블록이 원문 기호로 아래에 찍혔다가 줄이 완성되는 순간
+		// 서식 영역으로 튀어 올라가는 어색함을 없애기 위한 구조다.
+		// (renderMarkdown은 아직 닫히지 않은 ``` 펜스도 코드블록으로 처리하므로
+		// 코드는 처음부터 블록 안에서 자라나고, 깜빡이는 캐럿은 .typing CSS가 그린다)
+		bubble.classList.add('markdown', 'typing');
 
-		// 떨림(렉) 방지 구조: 매 글자마다 전체를 다시 렌더링하면 표·코드블록 DOM이
-		// 통째로 갈리면서 화면이 떨린다. 대신 "완성된 줄까지"는 마크다운으로 한 번만
-		// 그려 고정(stable)하고, 지금 흘러나오는 줄(tail)만 글자를 덧붙인다.
-		// 전체 재렌더링은 줄바꿈 순간에만 일어나므로 타이핑이 부드럽다.
-		const stable = document.createElement('div');
-		const tail = document.createElement('span');
-		tail.className = 'typing-tail';
-		bubble.textContent = '';
-		bubble.appendChild(stable);
-		bubble.appendChild(tail);
+		try {
+			for (let i = 0; i < text.length; i += chunkSize) {
+				if (shouldCancel && shouldCancel()) {
+					throw new DOMException('Aborted', 'AbortError');
+				}
+				// 사용자가 정지(연출 건너뛰기)를 눌렀으면 남은 연출을 중단한다.
+				// 호출부가 이어서 전체 답변을 마크다운으로 즉시 렌더링한다.
+				if (shouldSkip && shouldSkip()) {
+					break;
+				}
+				const visibleEnd = Math.min(text.length, i + chunkSize);
+				const visibleText = text.slice(0, visibleEnd);
+				bubble.innerHTML = renderMarkdown(visibleText);
 
-		let flushedLength = 0; // stable에 반영이 끝난 텍스트 길이
-		for (let i = 0; i < text.length; i += chunkSize) {
-			if (shouldCancel && shouldCancel()) {
-				throw new DOMException('Aborted', 'AbortError');
+				// 사용자가 위로 스크롤해 읽고 있으면 위치를 빼앗지 않는다.
+				if (/[.!?。！？\n]$/.test(visibleText)) {
+					scrollMessageListToBottom();
+				}
+				await sleep(baseDelay);
 			}
-			const visibleEnd = Math.min(text.length, i + chunkSize);
-			const visibleText = text.slice(0, visibleEnd);
-			const lastNewline = visibleText.lastIndexOf('\n');
-
-			if (lastNewline + 1 > flushedLength) {
-				stable.innerHTML = renderMarkdown(text.slice(0, lastNewline + 1));
-				flushedLength = lastNewline + 1;
-			}
-			tail.textContent = text.slice(flushedLength, visibleEnd);
-
-			// 사용자가 위로 스크롤해 읽고 있으면 위치를 빼앗지 않는다.
-			if (/[.!?。！？\n]$/.test(visibleText)) {
-				scrollMessageListToBottom();
-			}
-			await sleep(baseDelay);
+		} finally {
+			bubble.classList.remove('typing');
 		}
 	}
 
@@ -666,8 +675,80 @@
 		});
 	}
 
+	// ==== ChatGPT식 스크롤 구성 ====
+	// 질문을 보내면 질문이 화면 위쪽으로 올라가고, 그 아래 빈 공간에 답변이
+	// 위→아래로 채워진다. 이를 위해 목록 맨 끝에 높이를 조절하는 스페이서를 두어
+	// 대화가 짧아도 질문을 위로 올릴 스크롤 공간을 확보한다.
+	let turnSpacer = null;
+
+	function ensureTurnSpacer() {
+		if (!turnSpacer) {
+			turnSpacer = document.createElement('div');
+			turnSpacer.className = 'turn-spacer';
+			turnSpacer.setAttribute('aria-hidden', 'true');
+		}
+		// 방 전환·새 대화에서 목록이 통째로 비워지면(innerHTML = '') 스페이서도 사라지므로
+		// 그때는 높이를 0으로 되돌린 뒤 다시 붙인다
+		if (turnSpacer.parentNode !== messageList) {
+			turnSpacer.style.height = '0px';
+			messageList.appendChild(turnSpacer);
+		}
+		return turnSpacer;
+	}
+
+	function appendRowToList(row) {
+		// 스페이서가 항상 목록의 마지막에 남도록, 새 행은 스페이서 앞에 끼워 넣는다
+		messageList.insertBefore(row, ensureTurnSpacer());
+	}
+
+	function messageContentOverflow() {
+		// 실제 콘텐츠 끝(스페이서 위끝)이 화면 아래로 넘친 픽셀 수. 음수면 화면 안에 있다.
+		return ensureTurnSpacer().getBoundingClientRect().top - messageList.getBoundingClientRect().bottom;
+	}
+
 	function isMessageListNearBottom() {
-		return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 96;
+		return messageContentOverflow() < 96;
+	}
+
+	/**
+	 * 방금 보낸 질문 행을 화면 위쪽에 앵커링한다.
+	 * 스크롤할 공간이 부족하면 부족한 만큼 스페이서를 늘려 공간을 만든 뒤 올린다.
+	 */
+	function anchorTurnToTop(questionRow) {
+		if (!questionRow || !questionRow.isConnected) {
+			return;
+		}
+		const spacer = ensureTurnSpacer();
+		const listRect = messageList.getBoundingClientRect();
+		const targetScrollTop = Math.max(0,
+			messageList.scrollTop + (questionRow.getBoundingClientRect().top - listRect.top) - 18);
+		const contentEnd = messageList.scrollTop + (spacer.getBoundingClientRect().top - listRect.top);
+		const shortage = targetScrollTop + messageList.clientHeight - contentEnd;
+		spacer.style.height = Math.max(0, Math.round(shortage)) + 'px';
+		messageList.scrollTop = targetScrollTop;
+		autoFollowMessages = true;
+		scrollLatestButton.hidden = true;
+	}
+
+	/**
+	 * 스페이서를 "현재 화면이 흔들리지 않는 최소 높이"로 줄인다.
+	 * 미리보기 취소·전송 실패로 행이 걷혀나간 뒤, 대화 끝에 빈 공간이
+	 * 불필요하게 남는 것을 막는다. 현재 스크롤 위치는 그대로 유지된다.
+	 */
+	function collapseTurnSpacerToViewport() {
+		const spacer = ensureTurnSpacer();
+		const listRect = messageList.getBoundingClientRect();
+		const contentEnd = messageList.scrollTop + (spacer.getBoundingClientRect().top - listRect.top);
+		const needed = messageList.scrollTop + messageList.clientHeight - contentEnd;
+		spacer.style.height = Math.max(0, Math.round(needed)) + 'px';
+	}
+
+	function findPreviousUserRow(row) {
+		let previous = row ? row.previousElementSibling : null;
+		while (previous && !previous.classList.contains('user')) {
+			previous = previous.previousElementSibling;
+		}
+		return previous;
 	}
 
 	function scrollMessageListToBottom(force) {
@@ -675,7 +756,13 @@
 			scrollLatestButton.hidden = false;
 			return;
 		}
-		messageList.scrollTop = messageList.scrollHeight;
+		// 스페이서(빈 공간) 끝이 아니라 실제 콘텐츠 끝을 기준으로 내린다.
+		// 답변이 앵커링된 질문 아래 빈 공간에 채워지는 동안에는 화면이 움직이지 않고,
+		// 콘텐츠가 화면 아래로 넘칠 때만 따라 내려간다.
+		const overflow = messageContentOverflow();
+		if (overflow > 0) {
+			messageList.scrollTop += overflow;
+		}
 		scrollLatestButton.hidden = true;
 	}
 
@@ -944,13 +1031,17 @@
 		setSending(true);
 		const requestState = {
 			controller: new AbortController(),
-			cancelled: false
+			cancelled: false,
+			committed: false,   // 새 답변이 기존 답변을 교체 저장한 뒤인지 (이후엔 취소로 못 되돌림)
+			skipTyping: false   // 정지 시 타이핑 연출만 건너뛰고 확정된 새 답변을 즉시 표시
 		};
 		activeRequest = requestState;
 
 		// 기존 답변을 즉시 걷어내고, 그 자리에서 생각하는 상태로 전환
 		removeMessageRow(row);
 		const statusRow = appendStatusMessage('답변을 다시 생성하는 중...');
+		// 재생성도 새 턴처럼 원래 질문을 화면 위로 올리고 아래 공간에 새 답변을 채운다
+		anchorTurnToTop(findPreviousUserRow(statusRow));
 
 		try {
 			const response = await authorizedFetch('/api/chat/messages/regenerate', {
@@ -970,14 +1061,19 @@
 				throw new Error(data.message || '답변을 다시 생성하지 못했습니다.');
 			}
 
+			// 이 시점부터 새 답변이 기존 답변을 교체해 저장된 상태다. 취소해도 옛 답변은
+			// 되돌아오지 않으므로, 이후의 정지는 연출 건너뛰기(확정 답변 즉시 표시)로 동작한다.
+			requestState.committed = true;
 			await replaceStatusWithTypingMessage(statusRow, data.assistantContent || '', function () {
 				return requestState.cancelled;
+			}, function () {
+				return requestState.skipTyping;
 			});
 		} catch (error) {
 			removeMessageRow(statusRow);
 			// 실패·취소 시 걷어냈던 기존 답변을 먼저 제자리에 복구하고 (서버는 롤백되어 그대로임)
 			// 그 아래에 오류 안내를 붙인다
-			messageList.appendChild(row);
+			appendRowToList(row);
 			updateRegenerateVisibility();
 			scrollMessageListToBottom();
 			if (error.name !== 'AbortError') {
@@ -1570,10 +1666,17 @@
 
 	function addFiles(files) {
 		const rejected = [];
+		let rejectedImageCount = 0;
 		files.forEach(function (file) {
 			const type = getFileType(file.name);
 			if (!type) {
-				rejected.push(`${file.name} (지원하지 않는 형식)`);
+				// 이미지는 "미지원 형식" 오류가 아니라 준비 중 안내로 구분해서 보여준다
+				if (isImageFileName(file.name)) {
+					rejectedImageCount += 1;
+					rejected.push(`${file.name} (이미지는 추후 지원 예정)`);
+				} else {
+					rejected.push(`${file.name} (지원하지 않는 형식)`);
+				}
 				return;
 			}
 			if (file.size > MAX_FILE_BYTES) {
@@ -1596,12 +1699,25 @@
 		});
 		renderAttachments();
 		if (rejected.length > 0) {
-			const names = rejected.slice(0, 2).join(', ');
-			const suffix = rejected.length > 2 ? ` 외 ${rejected.length - 2}개` : '';
-			showAttachmentNotice(`${names}${suffix} 파일을 첨부하지 못했습니다.`, 'error');
+			// 이미지만 거절된 경우: 오류가 아니라 기능 준비 중 안내로 부드럽게 알린다
+			if (rejectedImageCount === rejected.length) {
+				showAttachmentNotice('이미지 첨부는 아직 준비 중이에요. 추후 업데이트로 지원할 예정입니다.');
+			} else {
+				const names = rejected.slice(0, 2).join(', ');
+				const suffix = rejected.length > 2 ? ` 외 ${rejected.length - 2}개` : '';
+				showAttachmentNotice(`${names}${suffix} 파일을 첨부하지 못했습니다.`, 'error');
+			}
 		} else if (files.length > 0) {
 			hideAttachmentNotice();
 		}
+	}
+
+	// 이미지 확장자 목록 — 첨부 거절 시 "추후 지원 예정" 안내 구분용
+	const IMAGE_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg', 'tif', 'tiff'];
+
+	function isImageFileName(fileName) {
+		const extension = (String(fileName || '').split('.').pop() || '').toLowerCase();
+		return IMAGE_FILE_EXTENSIONS.indexOf(extension) !== -1;
 	}
 
 	function renderAttachments() {
@@ -2170,29 +2286,34 @@
 		if (!request) {
 			return;
 		}
+		// 재생성은 새 답변이 저장되는 순간 기존 답변이 함께 교체돼 취소로 되돌릴 수 없다.
+		// 이때의 정지만 예외로 연출을 건너뛰고 확정된 새 답변을 즉시 보여준다.
+		if (request.committed) {
+			request.skipTyping = true;
+			return;
+		}
 		const cancelNavigationVersion = navigationVersion;
+		// 정지는 어느 단계든 즉시 화면에서 끊는다. 서버 취소 응답을 기다리는 동안
+		// 상태 표시나 타이핑이 계속되지 않도록 로컬 중단을 먼저 확정하고,
+		// 서버 정리는 이어서 백그라운드로 처리한다.
 		request.cancelled = true;
 		request.userCancelled = true;
+		request.controller.abort();
+		if (!request.accepted || !request.aiRunId) {
+			// 서버 실행 등록 전이면 SSE 연결 중단만으로 서버 쪽 실행도 함께 정리된다
+			return;
+		}
+		// 서버에는 실행 취소를 요청한다. 답변이 이미 완성·저장된 뒤라면 서버가 저장분을
+		// 폐기하므로, 어느 시점에 정지해도 대화를 다시 열었을 때 답변이 남지 않는다.
 		try {
-			if (request.accepted && request.aiRunId) {
-				const response = await authorizedFetch(`/api/chat/messages/runs/${request.aiRunId}`, { method: 'DELETE' });
-				const result = response.ok ? await readResponseBody(response) : { cancelled: false };
-				if (!result.cancelled) {
-					request.cancelled = false;
-					request.userCancelled = false;
-					return;
-				}
+			const response = await authorizedFetch(`/api/chat/messages/runs/${request.aiRunId}`, { method: 'DELETE' });
+			const result = response.ok ? await readResponseBody(response) : { cancelled: false };
+			if (!result.cancelled && cancelNavigationVersion === navigationVersion) {
+				appendMessage('system', '중단이 서버에 완전히 반영되지 않았습니다. 대화를 다시 열면 답변이 표시될 수 있습니다.');
 			}
 		} catch (error) {
-			request.cancelled = false;
-			request.userCancelled = false;
 			if (cancelNavigationVersion === navigationVersion) {
-				appendMessage('system', '응답 생성을 중단하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-			}
-			return;
-		} finally {
-			if (request.userCancelled) {
-				request.controller.abort();
+				appendMessage('system', '중단이 서버에 완전히 반영되지 않았습니다. 대화를 다시 열면 답변이 표시될 수 있습니다.');
 			}
 		}
 	}

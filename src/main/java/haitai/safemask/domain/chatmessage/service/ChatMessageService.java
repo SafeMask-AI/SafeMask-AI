@@ -1,6 +1,7 @@
 package haitai.safemask.domain.chatmessage.service;
 
 import haitai.safemask.domain.airun.entity.AiRun;
+import haitai.safemask.domain.airun.enums.AiRunStatus;
 import haitai.safemask.domain.airun.gateway.AiGateway;
 import haitai.safemask.domain.airun.gateway.AiGatewayResponse;
 import haitai.safemask.domain.airun.gateway.AiProgressListener;
@@ -207,6 +208,43 @@ public class ChatMessageService {
 			.map(AiRun::markCancelled)
 			.orElse(false));
 		return Boolean.TRUE.equals(cancelled);
+	}
+
+	/**
+	 * 이미 완료된 실행을 사용자 정지로 취소 처리하고, 그 실행이 저장한 답변을 폐기합니다.
+	 *
+	 * <p>답변 생성이 끝난 직후(화면 타이핑 연출 중) 정지를 누르면 실행은 COMPLETED로
+	 * 이미 커밋된 뒤라 {@link #markRunCancelled}로는 취소할 수 없습니다. 사용자가 받지
+	 * 않기로 한 답변이 대화에 남지 않도록 답변 메시지와 생성 파일을 함께 걷어냅니다.
+	 *
+	 * <p>SSE 연결 종료 경합으로 실행이 이미 CANCELLED 처리된 경우에는 저장된 답변도
+	 * 없으므로 성공으로 간주합니다. (정지 버튼이 조용히 무시되지 않게)
+	 */
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	public boolean discardCompletedRun(Long aiRunId) {
+		Boolean discarded = writeTransaction.execute(status -> aiRunRepository.findByIdForUpdate(aiRunId)
+			.map(aiRun -> {
+				if (aiRun.getStatus() == AiRunStatus.CANCELLED) {
+					return true;
+				}
+				ChatRoom chatRoom = aiRun.getChatRoom();
+				ChatMessage answer = chatMessageRepository
+					.findRecentByChatRoomIdOrderByIdDesc(chatRoom.getId(), 1)
+					.stream().findFirst().orElse(null);
+				// 방의 마지막 메시지가 "이 실행의 요청 메시지보다 뒤에 저장된 ASSISTANT 답변"일
+				// 때만 폐기한다. 다른 세션에서 대화가 이미 이어졌다면 건드리지 않는다.
+				if (answer == null || answer.getRole() != MessageRole.ASSISTANT
+					|| aiRun.getRequestMessage() == null
+					|| answer.getId() <= aiRun.getRequestMessage().getId()
+					|| !aiRun.markCancelledAfterCompletion()) {
+					return false;
+				}
+				generatedFileService.retireGeneratedFilesFromAnswer(chatRoom, answer.getOriginalContent());
+				chatMessageRepository.delete(answer);
+				return true;
+			})
+			.orElse(false));
+		return Boolean.TRUE.equals(discarded);
 	}
 
 	private InitialUserWrite saveApprovedUserMessage(Long chatRoomId, String displayContent, MaskingResult maskingResult,

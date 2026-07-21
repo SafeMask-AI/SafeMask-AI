@@ -4,6 +4,8 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>SafeMask Error</title>
+	<!-- 테마 스크립트는 스타일 적용 전에 data-theme을 확정해야 하므로 head에서 동기 로드 -->
+	<script th:src="@{/js/theme.js}"></script>
 	<style>
 		* {
 			box-sizing: border-box;
@@ -55,6 +57,27 @@
 			color: #6b7280;
 			font-size: 13px;
 			word-break: break-all;
+		}
+
+		/* 다크 모드: head의 theme.js가 설정한 data-theme을 따른다 */
+		html[data-theme='dark'] body {
+			background: #1d191d;
+			color: #ece4e9;
+		}
+
+		html[data-theme='dark'] main {
+			border-color: #4a3a44;
+			background: #2b242a;
+			box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+		}
+
+		html[data-theme='dark'] p {
+			color: #b3a6ad;
+		}
+
+		html[data-theme='dark'] .path {
+			border-top-color: #3a3138;
+			color: #897c84;
 		}
 	</style>
 </head>

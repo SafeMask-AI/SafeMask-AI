@@ -1,8 +1,11 @@
 <!DOCTYPE html>
 <html lang="ko" xmlns:th="http://www.thymeleaf.org">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>회원 승인 관리 | SafeMask</title><link rel="stylesheet" th:href="@{/css/admin.css}"></head>
-<body><div class="layout">
+<title>회원 승인 관리 | SafeMask</title>
+<!-- 테마 스크립트는 스타일 적용 전에 data-theme을 확정해야 하므로 head에서 동기 로드 -->
+<script th:src="@{/js/theme.js}"></script>
+<link rel="stylesheet" th:href="@{/css/admin.css}"></head>
+<body><button type="button" class="theme-toggle-floating" data-theme-toggle></button><div class="layout">
 <aside><a class="brand" href="/chat"><img th:src="@{/images/haitai-logo.jpg}" alt="해태"><span><small>HAITAI SECURE AI</small><b>SafeMask</b></span></a>
 <nav><a class="active" href="/admin">✓ 회원 승인 관리</a><a href="/chat">← 채팅으로 돌아가기</a></nav>
 <div class="profile"><i id="adminAvatar"></i><span><b id="adminName"></b><small>SafeMask 관리자</small></span></div></aside>

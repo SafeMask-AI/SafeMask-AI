@@ -1412,18 +1412,19 @@ body.modal-open .sidebar {
 .danger-button {
 	height: 36px;
 	padding: 0 14px;
-	border: 0;
+	border: 1px solid #f6d3e3;
 	border-radius: 8px;
-	background: var(--brand-pink-dark);
-	color: #ffffff;
+	background: #fff0f5;
+	color: var(--brand-pink-dark);
 	font-size: 13px;
 	font-weight: 800;
 	cursor: pointer;
-	transition: background 0.15s ease;
+	transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .danger-button:hover {
-	background: #a70f59;
+	background: #fde3ee;
+	border-color: #eebcd6;
 }
 
 .usage-guide-modal[hidden] {
@@ -2001,11 +2002,24 @@ body.modal-open .sidebar {
 }
 
 .composer-box .attach-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
 	background: none;
 	border: none;
-	font-size: 17px;
+	border-radius: 50%;
+	font-size: 22px;
+	font-weight: 500;
+	line-height: 1;
 	color: var(--text-gray);
 	cursor: pointer;
+}
+
+.composer-box .attach-button:hover {
+	background: var(--pink-soft);
+	color: var(--brand-pink-dark);
 }
 
 .composer-box textarea {
@@ -2454,8 +2468,8 @@ body.modal-open .sidebar {
 	color: #2e9e5b;
 }
 
-/* 타이핑 중 흘러나오는 꼬리 텍스트 끝의 깜빡이는 캐럿 */
-.typing-tail::after {
+/* 타이핑 중 마지막 블록 끝의 깜빡이는 캐럿 */
+.message-bubble.markdown.typing > :last-child::after {
 	content: '▍';
 	margin-left: 1px;
 	color: var(--brand-pink, #d94f70);
@@ -2477,7 +2491,485 @@ body.modal-open .sidebar {
 	}
 
 	.typing-dots span,
-	.typing-tail::after {
+	.message-bubble.markdown.typing > :last-child::after {
 		animation: none;
 	}
+}
+
+/* ==================== 테마 전환 버튼 ==================== */
+
+.sidebar-user .theme-toggle-button {
+	background: none;
+	border: none;
+	font-size: 15px;
+	color: var(--text-light-gray);
+	cursor: pointer;
+	padding: 4px;
+}
+
+.sidebar-user .theme-toggle-button:hover {
+	color: var(--brand-pink);
+}
+
+/* ==================== 다크 모드 ====================
+ * html[data-theme='dark']는 head의 theme.js가 스타일 적용 전에 설정한다.
+ * 브랜드 핑크는 포인트 색으로 유지하되, 표면·텍스트·보더는 어두운 팔레트로
+ * 일괄 교체한다. 아래 변수 교체로 대부분을 덮고, 밝은 색이 하드코딩된
+ * 컴포넌트는 개별 재지정한다.
+ */
+
+html[data-theme='dark'] {
+	--brand-pink: #f4408f;
+	--brand-pink-dark: #ff5ea6;
+	--sidebar-bg: #272028;
+	--pink-soft: #43313c;
+	--pink-border: #4a3a44;
+	--text-dark: #ece4e9;
+	--text-gray: #b3a6ad;
+	--text-light-gray: #897c84;
+	--green: #46c07e;
+	--green-soft: #273a30;
+	/* 스크롤바·폼 컨트롤 등 브라우저 기본 UI도 어둡게 */
+	color-scheme: dark;
+}
+
+html[data-theme='dark'] body {
+	background: #1d191d;
+}
+
+/* ---- 사이드바 ---- */
+
+html[data-theme='dark'] .sidebar-brand-mark {
+	/* 로고 JPG가 흰 배경이므로 어두운 화면에서도 흰 칩 형태를 유지한다 */
+	border-color: #4a3a44;
+	background: #ffffff;
+	box-shadow: none;
+}
+
+html[data-theme='dark'] .sidebar-brand-copy small {
+	color: #9d8a95;
+}
+
+html[data-theme='dark'] .sidebar-logo .service-name {
+	color: #f1e9ee;
+}
+
+html[data-theme='dark'] .admin-menu-link {
+	background: #332b32;
+}
+
+html[data-theme='dark'] .room-search input {
+	border-color: #4a3a44;
+	background: rgba(255, 255, 255, 0.07);
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .recent-list li.active {
+	background: var(--pink-soft);
+}
+
+/* ---- 메인 영역·헤더 ---- */
+
+html[data-theme='dark'] .main {
+	background: #221d22;
+}
+
+html[data-theme='dark'] .main-header {
+	border-bottom-color: #2c232a;
+	background: rgba(34, 29, 34, 0.96);
+}
+
+html[data-theme='dark'] .protection-status summary {
+	border-color: #33524a;
+	background: #20302a;
+	color: #58c58c;
+}
+
+html[data-theme='dark'] .protection-icon {
+	background: #27473a;
+	color: #58c58c;
+}
+
+html[data-theme='dark'] .protection-chevron {
+	color: #5f8a73;
+}
+
+html[data-theme='dark'] .protection-popover {
+	border-color: #40504a;
+	background: #262f2b;
+	box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- 온보딩 ---- */
+
+html[data-theme='dark'] .onboarding .center-logo {
+	filter: brightness(0.92);
+}
+
+html[data-theme='dark'] .usage-guide-button {
+	border-color: #4a3a44;
+	background: #2e262d;
+	color: var(--text-dark);
+	box-shadow: 0 7px 20px rgba(0, 0, 0, 0.3);
+}
+
+html[data-theme='dark'] .usage-guide-button:hover {
+	border-color: #684a5d;
+	background: #261d25;
+}
+
+html[data-theme='dark'] .usage-guide-icon {
+	background: #43313c;
+}
+
+/* ---- 메시지 ---- */
+
+html[data-theme='dark'] .scroll-latest-button {
+	border-color: #4a3a44;
+	background: rgba(43, 36, 42, 0.96);
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .message-row.user .message-bubble {
+	color: #f3e6ed;
+	background: #4a3440;
+	border-color: #5e4252;
+}
+
+html[data-theme='dark'] .message-row.system .message-bubble {
+	color: #ff9c92;
+	background: #3c2a2a;
+	border-color: #5c3a37;
+}
+
+/* ---- 마스킹 미리보기 ---- */
+
+html[data-theme='dark'] .masking-preview {
+	border-color: #4a3a44;
+	background: #2b242a;
+	box-shadow: 0 24px 72px rgba(0, 0, 0, 0.6);
+}
+
+html[data-theme='dark'] .masking-preview-backdrop {
+	background: rgba(0, 0, 0, 0.55);
+}
+
+html[data-theme='dark'] .masking-brand-mark {
+	filter: brightness(0.92);
+	border-radius: 8px;
+}
+
+html[data-theme='dark'] .masking-brand-divider {
+	background: #4a3a44;
+}
+
+html[data-theme='dark'] .masking-detail-icon,
+html[data-theme='dark'] .preview-heading-icon {
+	background: #43313c;
+}
+
+/* 닫기 버튼은 라이트와 동일한 투명 고스트 형태를 유지하고 호버 배경만 맞춘다 */
+html[data-theme='dark'] .preview-close:hover,
+html[data-theme='dark'] .masking-detail-close:hover {
+	background: #3a3239;
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .preview-type-chip {
+	background: #43313c;
+	border-color: #5c4553;
+}
+
+html[data-theme='dark'] .preview-sample-list {
+	border-color: #423840;
+	background: #2e262d;
+}
+
+html[data-theme='dark'] .preview-sample-row {
+	border-bottom-color: #3a3138;
+}
+
+html[data-theme='dark'] .preview-prompt-editor textarea {
+	border-color: #4a3e47;
+	background: #29222a;
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .preview-detail-toggle {
+	border-color: #423840;
+	background: #2e262d;
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .preview-feedback {
+	border-color: #66403d;
+	background: #3a2929;
+	color: #ff9c92;
+}
+
+/* ---- 마스킹 상세보기 ---- */
+
+html[data-theme='dark'] .masking-detail-backdrop {
+	background: rgba(0, 0, 0, 0.6);
+}
+
+html[data-theme='dark'] .masking-detail-dialog {
+	border-color: #4a3a44;
+	background: #2b242a;
+	box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+
+html[data-theme='dark'] .masking-detail-header {
+	border-bottom-color: #3a3138;
+	background: #2b242a;
+}
+
+html[data-theme='dark'] .masking-detail-group {
+	border-color: #423840;
+	background: #2e262d;
+}
+
+html[data-theme='dark'] .masking-detail-group-header {
+	background: #362e35;
+	border-bottom-color: #423840;
+}
+
+html[data-theme='dark'] .masking-detail-group-header:hover {
+	background: #3c333b;
+}
+
+html[data-theme='dark'] .masking-detail-count {
+	background: #43313c;
+}
+
+html[data-theme='dark'] .masking-detail-columns {
+	border-top-color: #423840;
+	background: #2e262d;
+}
+
+html[data-theme='dark'] .masking-detail-row {
+	background: #362e35;
+}
+
+html[data-theme='dark'] .masking-detail-row-token {
+	background: #3a3138;
+}
+
+html[data-theme='dark'] .preview-detection-card {
+	border-color: #423840;
+	background: #2e262d;
+}
+
+html[data-theme='dark'] .preview-detection-value.token {
+	background: #3a3138;
+}
+
+/* ---- 수동 마스킹·버튼 ---- */
+
+html[data-theme='dark'] .manual-mask select,
+html[data-theme='dark'] .manual-mask input {
+	border-color: #4a3e47;
+	background: #29222a;
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .preview-actions {
+	border-top-color: #3a3138;
+}
+
+html[data-theme='dark'] .secondary-button {
+	border-color: #4a4049;
+	background: #362e36;
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .manual-mask .secondary-button:hover,
+html[data-theme='dark'] .masking-preview .preview-actions > .secondary-button:hover {
+	border-color: #684a5d;
+	background: #43313c;
+}
+
+html[data-theme='dark'] .danger-button {
+	border-color: #684a5d;
+	background: #43313c;
+	color: #ff8fc0;
+}
+
+html[data-theme='dark'] .danger-button:hover {
+	background: #513a48;
+	border-color: #7d566c;
+}
+
+/* ---- 이용 안내 모달 ---- */
+
+html[data-theme='dark'] .usage-guide-backdrop {
+	background: rgba(0, 0, 0, 0.55);
+}
+
+html[data-theme='dark'] .usage-guide-dialog {
+	border-color: #4a3a44;
+	background: #2b242a;
+	box-shadow: 0 24px 72px rgba(0, 0, 0, 0.6);
+}
+
+html[data-theme='dark'] .usage-guide-header {
+	border-bottom-color: #3a3138;
+}
+
+html[data-theme='dark'] .usage-guide-close {
+	color: var(--text-gray);
+}
+
+html[data-theme='dark'] .usage-guide-close:hover {
+	background: #3a3239;
+}
+
+html[data-theme='dark'] .usage-guide-intro {
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .usage-guide-tabs {
+	background: #332b32;
+}
+
+html[data-theme='dark'] .usage-guide-tabs button[aria-selected="true"] {
+	background: #443a43;
+	box-shadow: none;
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .usage-steps li,
+html[data-theme='dark'] .usage-benefits li {
+	border-color: #423840;
+	background: #2e262d;
+}
+
+/* ---- 삭제 확인 모달 ---- */
+
+html[data-theme='dark'] .confirm-backdrop {
+	background: rgba(0, 0, 0, 0.55);
+}
+
+html[data-theme='dark'] .confirm-dialog {
+	border-color: #4a3a44;
+	background: #2b242a;
+	box-shadow: 0 24px 72px rgba(0, 0, 0, 0.6);
+}
+
+html[data-theme='dark'] .confirm-brand img {
+	filter: brightness(0.92);
+	border-radius: 6px;
+	mix-blend-mode: normal;
+}
+
+html[data-theme='dark'] .confirm-brand-divider {
+	background: #4a3a44;
+}
+
+html[data-theme='dark'] .confirm-warning-icon {
+	background: #43313c;
+}
+
+/* ---- 입력바·첨부 ---- */
+
+html[data-theme='dark'] .attachment-list {
+	border-color: #3a3138;
+	background: #2a232a;
+}
+
+html[data-theme='dark'] .composer-box {
+	border-color: #433942;
+	background: #2e262d;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+html[data-theme='dark'] .composer-box textarea {
+	background: transparent;
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .file-card {
+	border-color: #433942;
+	background: #2e262d;
+}
+
+html[data-theme='dark'] .file-card .file-name {
+	color: #d9dee8;
+}
+
+html[data-theme='dark'] .file-remove-button:hover {
+	background: #443a43;
+}
+
+html[data-theme='dark'] .message-row.user .sent-files .file-card {
+	border-color: rgba(255, 255, 255, 0.1);
+	background: rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme='dark'] .attachment-notice {
+	color: #f0b27a;
+	background: #3a2e24;
+	border-color: #5c4832;
+}
+
+html[data-theme='dark'] .drop-overlay {
+	background: rgba(34, 28, 33, 0.92);
+	color: var(--text-dark);
+}
+
+html[data-theme='dark'] .file-download-card {
+	border-color: #3a4356;
+	background: #1e2430;
+	color: #9db4dc;
+}
+
+html[data-theme='dark'] .file-download-card .file-action {
+	color: #7ea4e0;
+}
+
+/* ---- 마크다운 답변 ---- */
+
+html[data-theme='dark'] .message-bubble.markdown code {
+	background: #3a323a;
+}
+
+/* 코드블록 안 code에는 인라인 칩 배경을 칠하지 않는다.
+ * 위 다크 규칙이 라이트의 `pre code { background: none }` 리셋보다 우선순위가
+ * 높아, 여러 줄 code 배경이 줄마다 네모 박스처럼 그려지는 문제를 막는다. */
+html[data-theme='dark'] .message-bubble.markdown pre code {
+	background: none;
+}
+
+html[data-theme='dark'] .message-bubble.markdown pre {
+	background: #20262d;
+}
+
+html[data-theme='dark'] .message-bubble.markdown td,
+html[data-theme='dark'] .message-bubble.markdown th {
+	border-color: #3a3138;
+}
+
+html[data-theme='dark'] .message-bubble.markdown th {
+	background: #332b32;
+}
+
+html[data-theme='dark'] .message-bubble.markdown hr {
+	border-top-color: #3a3138;
+}
+
+html[data-theme='dark'] .message-bubble.markdown a {
+	color: #7ea4e0;
+}
+
+/* 복사·다시생성 버튼은 라이트와 동일한 투명 고스트 형태를 유지하고 호버 색만 맞춘다 */
+html[data-theme='dark'] .message-action-button:hover {
+	background: #443a43;
+	color: var(--text-dark);
+}
+
+/* ---- 모바일 사이드바 ---- */
+
+html[data-theme='dark'] .sidebar-backdrop {
+	background: rgba(0, 0, 0, 0.55);
 }
