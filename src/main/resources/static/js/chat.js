@@ -131,6 +131,8 @@
 	const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 	const scrollLatestButton = document.getElementById('scrollLatestButton');
 	const confirmModal = document.getElementById('confirmModal');
+	const confirmTitle = document.getElementById('confirmTitle');
+	const confirmDescription = document.getElementById('confirmDescription');
 	const confirmCancelButton = document.getElementById('confirmCancelButton');
 	const confirmApproveButton = document.getElementById('confirmApproveButton');
 	const usageGuideButton = document.getElementById('usageGuideButton');
@@ -2039,7 +2041,11 @@
 
 	async function archiveRoom(chatRoomId) {
 		closeSidebar();
-		if (!await openConfirmDialog()) {
+		if (!await openConfirmDialog({
+			title: '대화를 삭제할까요?',
+			description: '목록에서 삭제한 대화와 첨부파일은 다시 확인할 수 없습니다.',
+			approveLabel: '대화 삭제'
+		})) {
 			return;
 		}
 
@@ -2450,10 +2456,14 @@
 		usageBenefitsPanel.hidden = showSteps;
 	}
 
-	function openConfirmDialog() {
+	function openConfirmDialog(options) {
 		if (confirmResolver) {
 			closeConfirmDialog(false);
 		}
+		const dialogOptions = options || {};
+		confirmTitle.textContent = dialogOptions.title || '계속 진행할까요?';
+		confirmDescription.textContent = dialogOptions.description || '이 작업을 진행할지 확인해 주세요.';
+		confirmApproveButton.textContent = dialogOptions.approveLabel || '확인';
 		confirmReturnFocus = document.activeElement;
 		confirmModal.hidden = false;
 		updateOverlayScrollLock();
@@ -2529,6 +2539,14 @@
 	}
 
 	document.getElementById('logoutButton').addEventListener('click', async function () {
+		const approved = await openConfirmDialog({
+			title: '정말 로그아웃하시겠습니까?',
+			description: '로그아웃하면 현재 기기의 로그인 정보가 안전하게 삭제됩니다.',
+			approveLabel: '로그아웃'
+		});
+		if (!approved) {
+			return;
+		}
 		try {
 			await fetch('/api/auth/logout', { method: 'POST' });
 		} catch (e) {

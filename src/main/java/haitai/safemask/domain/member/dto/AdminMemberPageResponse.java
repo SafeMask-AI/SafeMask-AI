@@ -8,6 +8,7 @@ public record AdminMemberPageResponse(
 	int totalPages,
 	int page,
 	int size,
+	long totalMemberCount,
 	long pendingCount,
 	long approvedCount,
 	long rejectedCount

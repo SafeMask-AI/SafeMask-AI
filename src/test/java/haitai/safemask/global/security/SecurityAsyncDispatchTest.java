@@ -5,6 +5,9 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockServletContext;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -76,6 +80,21 @@ class SecurityAsyncDispatchTest {
 	void unauthenticatedInitialRequestIsStillRejected() throws Exception {
 		mockMvc.perform(get("/test/async"))
 			.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void unauthenticatedApiRequestKeepsJson401Contract() throws Exception {
+		mockMvc.perform(get("/api/private-resource").accept(MediaType.TEXT_HTML))
+			.andExpect(status().isUnauthorized())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+			.andExpect(jsonPath("$.code").value("COMMON_401"));
+	}
+
+	@Test
+	void unknownBrowserNavigationForwardsToNotFoundPage() throws Exception {
+		mockMvc.perform(get("/admin/not-existing-page").accept(MediaType.TEXT_HTML))
+			.andExpect(status().isNotFound())
+			.andExpect(forwardedUrl("/error/not-found"));
 	}
 
 	@EnableWebMvc
