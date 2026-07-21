@@ -138,6 +138,22 @@ public class AiRun {
 		return true;
 	}
 
+	/**
+	 * 완료된 실행을 사용자 정지로 취소 처리합니다.
+	 *
+	 * <p>답변 생성이 끝난 직후(화면 타이핑 연출 중) 사용자가 정지를 누른 경우로,
+	 * 호출부는 이 전이가 성공하면 이 실행이 저장한 답변을 함께 폐기해야 합니다.
+	 */
+	public boolean markCancelledAfterCompletion() {
+		if (this.status != AiRunStatus.COMPLETED) {
+			return false;
+		}
+		this.status = AiRunStatus.CANCELLED;
+		this.errorMessage = null;
+		this.completedAt = LocalDateTime.now();
+		return true;
+	}
+
 	@PrePersist
 	void prePersist() {
 		LocalDateTime now = LocalDateTime.now();
