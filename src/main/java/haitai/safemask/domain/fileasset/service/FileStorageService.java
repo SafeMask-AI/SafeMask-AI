@@ -23,6 +23,8 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 public class FileStorageService {
+	public record StorageStatus(boolean writable, long usableBytes, long totalBytes) {
+	}
 
 	private final Path basePath;
 
@@ -79,5 +81,15 @@ public class FileStorageService {
 			log.error("저장된 파일 삭제에 실패했습니다. storedName={}", storedName, e);
 			throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
 		}
+	}
+
+	/**
+	 * 관리자 모니터링에서 저장소의 쓰기 가능 여부와 남은 용량만 확인합니다.
+	 * 실제 경로는 운영 구조를 노출할 수 있으므로 응답에 포함하지 않습니다.
+	 */
+	public StorageStatus inspectStatus() throws IOException {
+		Files.createDirectories(basePath);
+		var fileStore = Files.getFileStore(basePath);
+		return new StorageStatus(Files.isWritable(basePath), fileStore.getUsableSpace(), fileStore.getTotalSpace());
 	}
 }
