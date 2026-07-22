@@ -15,4 +15,9 @@ public class AdminViewController {
 	public String maskingRulesPage() {
 		return "admin/rules";
 	}
+
+	@GetMapping("/admin/monitoring")
+	public String monitoringPage() {
+		return "admin/monitoring";
+	}
 }

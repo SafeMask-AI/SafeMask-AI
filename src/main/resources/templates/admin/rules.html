@@ -6,7 +6,7 @@
 <link rel="stylesheet" th:href="@{/css/admin.css}"></head>
 <body><button type="button" class="theme-toggle-floating" data-theme-toggle></button><div class="layout">
 <aside><a class="brand" href="/admin"><img th:src="@{/images/haitai-logo.jpg}" alt="해태"><span><small>HAITAI SECURE AI</small><b>SafeMask</b></span></a>
-<nav><a href="/admin">✓ 회원 승인 관리</a><a class="active" href="/admin/rules">⌘ 마스킹 규칙 관리</a></nav>
+<nav><a href="/admin">✓ 회원 승인 관리</a><a class="active" href="/admin/rules">⌘ 마스킹 규칙 관리</a><a href="/admin/monitoring">◉ 운영 모니터링</a></nav>
 <div class="profile"><i id="adminAvatar"></i><span><b id="adminName"></b><small>SafeMask 관리자</small></span><button id="adminLogoutButton" class="logout" type="button">로그아웃</button></div></aside>
 <main><header><div><em>MASKING POLICY</em><h1>마스킹 규칙 관리</h1><p>기본 보호 규칙은 유지하면서 회사 고유 키워드와 제한된 정규식을 추가할 수 있습니다.</p></div><button id="newRuleButton" class="primary" type="button">새 규칙 만들기</button></header>
 <section class="rule-notice"><b>안전한 적용 순서</b><span>규칙을 저장하면 비활성 초안으로 생성됩니다. 샘플 문장으로 결과를 확인한 뒤 활성화하세요.</span></section>

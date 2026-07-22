@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>운영 모니터링 | SafeMask</title>
+	<script th:src="@{/js/theme.js}"></script>
+	<link rel="stylesheet" th:href="@{/css/admin.css}">
+</head>
+<body>
+<button type="button" class="theme-toggle-floating" data-theme-toggle></button>
+<div class="layout">
+	<aside>
+		<a class="brand" href="/admin"><img th:src="@{/images/haitai-logo.jpg}" alt="해태"><span><small>HAITAI SECURE AI</small><b>SafeMask</b></span></a>
+		<nav><a href="/admin">✓ 회원 승인 관리</a><a href="/admin/rules">⌘ 마스킹 규칙 관리</a><a class="active" href="/admin/monitoring">◉ 운영 모니터링</a></nav>
+		<div class="profile"><i id="adminAvatar"></i><span><b id="adminName"></b><small>SafeMask 관리자</small></span><button id="adminLogoutButton" class="logout" type="button">로그아웃</button></div>
+	</aside>
+	<main class="monitoring-main">
+		<header class="monitoring-header">
+			<div><em>SAFE OPERATIONS</em><h1>운영 모니터링</h1><p>개별 대화 내용 없이 SafeMask의 보호 실적과 시스템 상태를 확인합니다.</p></div>
+			<div class="monitoring-refresh"><small id="monitoringUpdatedAt">조회 준비 중</small><button id="monitoringRefreshButton" class="secondary" type="button">새로고침</button></div>
+		</header>
+
+		<p id="monitoringFeedback" class="monitoring-feedback" role="alert" hidden></p>
+		<section class="monitoring-status-banner" id="monitoringStatusBanner" aria-live="polite">
+			<i class="status-shield" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.8 2.8 8.2 7 10 4.2-1.8 7-5.2 7-10V6l-7-3Z"/><path d="m8.5 12 2.2 2.2 4.8-4.8"/></svg></i>
+			<div><b id="monitoringStatusTitle">운영 상태를 확인하고 있습니다</b><span id="monitoringStatusDescription">개별 대화 내용 없이 보호 실적과 시스템 연결 상태를 확인합니다.</span></div>
+		</section>
+
+		<section class="monitoring-summary" aria-label="오늘의 운영 현황">
+			<article class="metric-card requests"><div class="metric-card-content"><i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 6.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-8l-4.5 3v-3H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/></svg></i><div><span>오늘 AI 요청</span><b id="todayRequestCount">-</b><small>승인 후 실행된 요청</small></div></div></article>
+			<article class="metric-card protected"><div class="metric-card-content"><i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.8 2.8 8.2 7 10 4.2-1.8 7-5.2 7-10V6l-7-3Z"/><path d="m8.5 12 2.2 2.2 4.8-4.8"/></svg></i><div><span>마스킹 적용</span><b id="todayMaskedCount">-</b><small id="todayMaskingRate">전체 요청의 -</small></div></div></article>
+			<article class="metric-card detections"><div class="metric-card-content"><i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10M12 14v2"/></svg></i><div><span>보호한 민감정보</span><b id="todayDetectionCount">-</b><small>원문을 남기지 않은 탐지 항목</small></div></div></article>
+			<article class="metric-card success"><div class="metric-card-content"><i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></svg></i><div><span>AI 처리 성공률</span><b id="todaySuccessRate">-</b><small id="todayOutcomeText">완료 - · 실패 -</small></div></div></article>
+			<article class="metric-card latency"><div class="metric-card-content"><i class="metric-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></i><div><span>평균 응답시간</span><b id="todayAverageLatency">-</b><small>오늘 완료된 AI 요청 기준</small></div></div></article>
+		</section>
+
+		<div class="monitoring-grid">
+			<section class="monitoring-panel trend-panel">
+				<div class="monitoring-panel-header"><div><span>최근 7일</span><h2>요청과 보호 추이</h2></div><div class="chart-legend"><i class="requests"></i>AI 요청<i class="masked"></i>마스킹 적용<i class="failed"></i>실패</div></div>
+				<div class="trend-chart-wrap"><svg id="trendChart" class="trend-chart" viewBox="0 0 760 250" role="img" aria-label="최근 7일 AI 요청과 마스킹 적용 추이"></svg><p id="trendEmpty" class="chart-empty" hidden>최근 7일 처리 이력이 없습니다.</p></div>
+			</section>
+
+			<section class="monitoring-panel system-panel">
+				<div class="monitoring-panel-header"><div><span>LIVE STATUS</span><h2>시스템 상태</h2></div></div>
+				<ul id="systemHealthList" class="system-health-list" aria-live="polite"></ul>
+			</section>
+
+			<section class="monitoring-panel masking-panel">
+				<div class="monitoring-panel-header"><div><span>최근 7일</span><h2>민감정보 보호 분포</h2></div><small id="maskingTypeTotal">총 -건</small></div>
+				<div id="maskingTypeChart" class="horizontal-bars"></div>
+				<p id="maskingTypeEmpty" class="panel-empty" hidden>아직 집계된 마스킹 탐지가 없습니다.</p>
+			</section>
+
+			<section class="monitoring-panel outcome-panel">
+				<div class="monitoring-panel-header"><div><span>오늘</span><h2>AI 처리 결과</h2></div></div>
+				<div id="outcomeChart" class="outcome-chart"></div>
+				<p class="monitoring-note">사용자가 직접 중단한 요청은 실패율 계산에서 제외합니다.</p>
+			</section>
+		</div>
+	</main>
+</div>
+<script th:src="@{/js/admin-shell.js}"></script>
+<script th:src="@{/js/admin-monitoring.js}"></script>
+</body>
+</html>
