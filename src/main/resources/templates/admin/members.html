@@ -6,10 +6,10 @@
 <script th:src="@{/js/theme.js}"></script>
 <link rel="stylesheet" th:href="@{/css/admin.css}"></head>
 <body><button type="button" class="theme-toggle-floating" data-theme-toggle></button><div class="layout">
-<aside><a class="brand" href="/chat"><img th:src="@{/images/haitai-logo.jpg}" alt="해태"><span><small>HAITAI SECURE AI</small><b>SafeMask</b></span></a>
-<nav><a class="active" href="/admin">✓ 회원 승인 관리</a><a href="/chat">← 채팅으로 돌아가기</a></nav>
-<div class="profile"><i id="adminAvatar"></i><span><b id="adminName"></b><small>SafeMask 관리자</small></span></div></aside>
-<main><header><div><em>ACCOUNT CONTROL</em><h1>회원 승인 관리</h1><p>가입 신청을 확인하고 SafeMask 사용 권한을 안전하게 관리하세요.</p></div><a href="/chat">채팅 열기</a></header>
+<aside><a class="brand" href="/admin"><img th:src="@{/images/haitai-logo.jpg}" alt="해태"><span><small>HAITAI SECURE AI</small><b>SafeMask</b></span></a>
+<nav><a class="active" href="/admin">✓ 회원 승인 관리</a><a href="/admin/rules">⌘ 마스킹 규칙 관리</a></nav>
+<div class="profile"><i id="adminAvatar"></i><span><b id="adminName"></b><small>SafeMask 관리자</small></span><button id="adminLogoutButton" class="logout" type="button">로그아웃</button></div></aside>
+<main><header><div><em>ACCOUNT CONTROL</em><h1>회원 승인 관리</h1><p>가입 신청을 확인하고 SafeMask 사용 권한을 안전하게 관리하세요.</p></div></header>
 <section class="summary" aria-label="회원 승인 현황">
 <button class="card active" data-status="ALL"><span>전체 회원</span><b id="totalCount">-</b><small>관리자 포함 전체 계정</small></button>
 <button class="card" data-status="PENDING"><span>승인 대기</span><b id="pendingCount">-</b><small>확인이 필요한 신청</small></button>
@@ -21,4 +21,4 @@
 <div id="emptyState" class="empty" hidden><i>✓</i><b id="emptyStateTitle">표시할 회원이 없습니다.</b><span id="emptyStateDescription">검색 조건이나 다른 승인 상태를 확인해 보세요.</span></div></div>
 <nav id="pagination" class="pages" aria-label="회원 목록 페이지"></nav></section></main></div>
 <div id="confirmModal" class="modal" hidden><div data-close-modal></div><section role="dialog" aria-modal="true" aria-labelledby="confirmTitle"><i>✓</i><h2 id="confirmTitle"></h2><p id="confirmMessage"></p><footer><button id="cancelButton">취소</button><button id="confirmButton">확인</button></footer></section></div>
-<script th:src="@{/js/admin.js}"></script></body></html>
+<script th:src="@{/js/admin-shell.js}"></script><script th:src="@{/js/admin.js}"></script></body></html>

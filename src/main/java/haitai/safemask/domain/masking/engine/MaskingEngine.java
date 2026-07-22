@@ -52,10 +52,11 @@ public class MaskingEngine {
 			+ "|\\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\\b");
 	private static final Pattern SQL_QUALIFIED_SEMANTIC_TOKEN = Pattern.compile(
 		"\\b([A-Z][A-Z0-9_]*)\\.([A-Z][A-Z0-9_]*)\\b");
+	private static final int MAX_COMPILED_PATTERN_CACHE_SIZE = 512;
 
 	/**
 	 * 규칙 정규식의 컴파일 결과 캐시. (패턴 문자열 → 컴파일 결과)
-	 * 규칙 수가 적고 요청마다 재사용되므로 크기 제한 없이 캐시해도 안전합니다.
+	 * 관리자 규칙 수정으로 서로 다른 패턴이 계속 유입될 수 있어 상한을 둡니다.
 	 * 컴파일에 실패한 패턴은 empty로 캐시해 요청마다 재시도·로그 반복을 막습니다.
 	 */
 	private final Map<String, Optional<Pattern>> patternCache = new ConcurrentHashMap<>();
@@ -315,12 +316,18 @@ public class MaskingEngine {
 	 * 해당 규칙만 건너뜁니다. 규칙 하나가 깨져도 전체 마스킹이 중단되면 안 되기 때문입니다.
 	 */
 	private Pattern compileOrSkip(MaskingRule rule) {
-		return patternCache.computeIfAbsent(rule.getPattern(), patternText -> {
+		String effectivePattern = rule.patternForCompilation();
+		String cacheKey = rule.getRuleKind().name() + ':' + effectivePattern;
+		if (patternCache.size() >= MAX_COMPILED_PATTERN_CACHE_SIZE
+			&& !patternCache.containsKey(cacheKey)) {
+			patternCache.clear();
+		}
+		return patternCache.computeIfAbsent(cacheKey, ignored -> {
 			try {
-				return Optional.of(Pattern.compile(patternText));
+				return Optional.of(Pattern.compile(effectivePattern));
 			} catch (PatternSyntaxException e) {
 				log.warn("마스킹 규칙의 정규식 컴파일에 실패해 탐지에서 제외합니다. rule={}, pattern={}",
-					rule.getName(), patternText, e);
+					rule.getName(), effectivePattern, e);
 				return Optional.empty();
 			}
 		}).orElse(null);

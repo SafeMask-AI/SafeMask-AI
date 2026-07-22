@@ -23,6 +23,10 @@
 		window.location.href = '/login';
 		return;
 	}
+	if (readAuthValue('memberRole') === 'ADMIN') {
+		window.location.replace('/admin');
+		return;
+	}
 
 	let currentChatRoomId = null;
 	let pendingPreview = null;
@@ -83,14 +87,9 @@
 
 	const name = readAuthValue('memberName') || '사용자';
 	const department = readAuthValue('memberDepartment') || '';
-	const adminMenuLink = document.getElementById('adminMenuLink');
-
 	document.getElementById('userAvatar').textContent = name.charAt(0);
 	document.getElementById('userName').textContent = name;
 	document.getElementById('userMeta').textContent = department;
-	if (adminMenuLink && readAuthValue('memberRole') === 'ADMIN') {
-		adminMenuLink.hidden = false;
-	}
 
 	const onboarding = document.getElementById('onboarding');
 	const main = document.querySelector('.main');

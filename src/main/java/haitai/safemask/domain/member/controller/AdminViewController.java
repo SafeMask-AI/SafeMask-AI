@@ -10,4 +10,9 @@ public class AdminViewController {
 	public String adminPage() {
 		return "admin/members";
 	}
+
+	@GetMapping("/admin/rules")
+	public String maskingRulesPage() {
+		return "admin/rules";
+	}
 }

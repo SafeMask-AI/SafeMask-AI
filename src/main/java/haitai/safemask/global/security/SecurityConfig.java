@@ -69,10 +69,13 @@ public class SecurityConfig {
 				.requestMatchers("/api/auth/**").permitAll()
 				// Thymeleaf 화면(로그인/회원가입)과 정적 리소스 (필요 시 경로 추가)
 				.requestMatchers("/", "/login", "/signup", "/account/pending", "/account/rejected",
-					"/chat", "/admin", "/css/**", "/js/**", "/images/**",
+					"/chat", "/admin", "/admin/rules", "/css/**", "/js/**", "/images/**",
 					"/favicon.ico", "/error", "/error/**").permitAll()
 				// 관리자 전용 API
 				.requestMatchers("/api/admin/**").hasRole("ADMIN")
+				// 관리자 계정은 운영 기능에만 사용합니다. 채팅·첨부 API는 승인된 일반 회원만
+				// 접근하게 해, 화면 URL이나 기존 토큰을 이용한 관리자 채팅 우회를 차단합니다.
+				.requestMatchers("/api/chat/**", "/api/files/**").hasRole("USER")
 				// 그 외 모든 요청은 유효한 Access Token 필요
 				.anyRequest().authenticated()
 			)

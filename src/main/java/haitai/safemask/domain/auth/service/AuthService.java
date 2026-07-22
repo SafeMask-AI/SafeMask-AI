@@ -7,6 +7,7 @@ import haitai.safemask.domain.auth.dto.LoginResult;
 import haitai.safemask.domain.auth.dto.SignupRequest;
 import haitai.safemask.domain.auth.dto.SignupResponse;
 import haitai.safemask.domain.auth.dto.TokenRefreshResult;
+import haitai.safemask.domain.auth.dto.TokenRefreshResponse;
 import haitai.safemask.domain.auth.entity.RefreshToken;
 import haitai.safemask.domain.auth.repository.RefreshTokenRepository;
 import haitai.safemask.domain.member.entity.Member;
@@ -151,7 +152,7 @@ public class AuthService {
 		// issueRefreshToken 내부에서 기존 토큰을 모두 삭제한 뒤 새로 발급합니다.
 		String newRefreshToken = issueRefreshToken(member);
 
-		return new TokenRefreshResult(newAccessToken, newRefreshToken);
+		return new TokenRefreshResult(TokenRefreshResponse.of(member, newAccessToken), newRefreshToken);
 	}
 
 	/**

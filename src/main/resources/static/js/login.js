@@ -28,8 +28,12 @@
 		authStorage.setItem('memberRole', result.role);
 	}
 
+	function destinationForRole(role) {
+		return role === 'ADMIN' ? '/admin' : '/chat';
+	}
+
 	if (rememberLoginEnabled() && localStorage.getItem('accessToken')) {
-		window.location.href = '/chat';
+		window.location.href = destinationForRole(localStorage.getItem('memberRole'));
 		return;
 	}
 
@@ -66,13 +70,8 @@
 			if (!result.accessToken) {
 				return;
 			}
-			storeAuthResult({
-				accessToken: result.accessToken,
-				name: localStorage.getItem('memberName') || '사용자',
-				department: localStorage.getItem('memberDepartment') || '',
-				role: localStorage.getItem('memberRole') || ''
-			}, true);
-			window.location.href = '/chat';
+			storeAuthResult(result, true);
+			window.location.href = destinationForRole(result.role);
 		} catch (e) {
 		}
 	})();
@@ -162,8 +161,8 @@
 			// JS에서 저장하지 않습니다. (XSS로 탈취 불가)
 			storeAuthResult(result, Boolean(rememberLogin && rememberLogin.checked));
 
-			// 로그인 성공 → 채팅 메인 화면으로 이동합니다.
-			window.location.href = '/chat';
+			// 관리자는 운영 화면으로, 일반 사용자는 채팅 화면으로 분리합니다.
+			window.location.href = destinationForRole(result.role);
 		} catch (e) {
 			message.textContent = '서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.';
 		} finally {

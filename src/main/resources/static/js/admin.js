@@ -1,5 +1,8 @@
 (function () {
-	const AUTH_KEYS = ['accessToken', 'memberName', 'memberDepartment', 'memberRole', 'authPersistence'];
+	if (!window.SafeMaskAdmin || !window.SafeMaskAdmin.requireAdmin()) {
+		return;
+	}
+	const api = window.SafeMaskAdmin.api;
 	const body = document.getElementById('memberTableBody');
 	const emptyState = document.getElementById('emptyState');
 	const emptyStateTitle = document.getElementById('emptyStateTitle');
@@ -18,67 +21,12 @@
 	const approvedCount = document.getElementById('approvedCount');
 	const rejectedCount = document.getElementById('rejectedCount');
 
-	let token = getAuthValue('accessToken');
 	let status = 'ALL';
 	let page = 0;
 	let pendingAction = null;
 	let reviewReturnFocus = null;
 	let feedbackTimer = null;
 	let lastCounts = { total: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 };
-
-	if (!token || getAuthValue('memberRole') !== 'ADMIN') {
-		window.location.replace(token ? '/chat' : '/login');
-		return;
-	}
-
-	const name = getAuthValue('memberName') || '관리자';
-	document.getElementById('adminName').textContent = name;
-	document.getElementById('adminAvatar').textContent = name[0];
-
-	function getAuthValue(key) {
-		return localStorage.getItem(key) || sessionStorage.getItem(key);
-	}
-
-	function clearLocalAuth() {
-		AUTH_KEYS.forEach(function (key) {
-			localStorage.removeItem(key);
-			sessionStorage.removeItem(key);
-		});
-		window.location.href = '/login';
-	}
-
-	async function refreshAccessToken() {
-		const response = await fetch('/api/auth/refresh', {
-			method: 'POST',
-			headers: {
-				'X-Remember-Login': localStorage.getItem('authPersistence') === 'local' ? 'true' : 'false'
-			}
-		});
-		if (!response.ok) {
-			clearLocalAuth();
-			throw new Error('로그인이 만료되었습니다.');
-		}
-		token = (await response.json()).accessToken;
-		const storage = localStorage.getItem('authPersistence') === 'local' ? localStorage : sessionStorage;
-		storage.setItem('accessToken', token);
-	}
-
-	async function api(url, options, retry) {
-		const requestOptions = Object.assign({}, options || {});
-		requestOptions.headers = Object.assign({}, requestOptions.headers || {}, {
-			Authorization: `Bearer ${token}`
-		});
-		let response = await fetch(url, requestOptions);
-		if (response.status === 401 && retry !== false) {
-			await refreshAccessToken();
-			return api(url, requestOptions, false);
-		}
-		if (response.status === 403) {
-			window.location.replace('/chat');
-			throw new Error('관리자 권한이 필요합니다.');
-		}
-		return response;
-	}
 
 	function escapeHtml(value) {
 		return String(value || '')

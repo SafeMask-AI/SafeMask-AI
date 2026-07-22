@@ -6,7 +6,7 @@ import haitai.safemask.domain.masking.engine.MaskingEngine;
 import haitai.safemask.domain.masking.store.TokenMappingStore;
 import haitai.safemask.domain.maskingentity.enums.MaskingType;
 import haitai.safemask.domain.maskingrule.entity.MaskingRule;
-import haitai.safemask.domain.maskingrule.repository.MaskingRuleRepository;
+import haitai.safemask.domain.maskingrule.service.MaskingRuleService;
 import haitai.safemask.domain.maskingrule.service.MaskingRuleSeeder;
 import haitai.safemask.domain.namedictionary.service.NameDictionaryService;
 import haitai.safemask.global.exception.CustomException;
@@ -32,7 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class MaskingService {
 
-	private final MaskingRuleRepository maskingRuleRepository;
+	private final MaskingRuleService maskingRuleService;
 	private final TokenMappingStore tokenMappingStore;
 	private final MaskingEngine maskingEngine;
 	private final NameDictionaryService nameDictionaryService;
@@ -55,7 +55,7 @@ public class MaskingService {
 	 * 마구 잡기 때문에, 사전 없이 단독으로 켜지면 안 됩니다.
 	 */
 	private List<MaskingRule> resolveActiveRules() {
-		List<MaskingRule> activeRules = maskingRuleRepository.findByEnabledTrueOrderByPriorityAsc();
+		List<MaskingRule> activeRules = maskingRuleService.activeRules();
 		if (!nameDictionaryService.isEmpty()) {
 			return activeRules;
 		}
