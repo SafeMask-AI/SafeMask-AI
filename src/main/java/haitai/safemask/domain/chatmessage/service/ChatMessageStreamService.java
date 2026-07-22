@@ -9,6 +9,7 @@ import haitai.safemask.domain.chatmessage.dto.ChatSendResponse;
 import haitai.safemask.domain.chatmessage.dto.ChatStreamErrorResponse;
 import haitai.safemask.domain.chatmessage.service.ChatMessageService.PreparedSend;
 import haitai.safemask.domain.member.entity.Member;
+import haitai.safemask.global.exception.CustomException;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
@@ -57,15 +58,38 @@ public class ChatMessageStreamService {
 	}
 
 	public SseEmitter send(Member member, ChatSendRequest request) {
-		PreparedSend prepared = chatMessageService.prepare(member, request);
+		PreparedSend prepared;
+		try {
+			prepared = chatMessageService.prepare(member, request);
+		} catch (CustomException e) {
+			return reject(e.getMessage());
+		}
 		return start(prepared);
 	}
 
 	public SseEmitter sendWithFiles(Member member, ChatSendRequest request, List<MultipartFile> files) {
 		// MultipartFile은 HTTP 요청이 끝나면 임시 파일이 정리될 수 있으므로 prepare 단계에서 동기적으로
 		// 추출·검증·저장하고, 외부 AI 호출만 전용 executor로 넘깁니다.
-		PreparedSend prepared = chatMessageService.prepareWithFiles(member, request, files);
+		PreparedSend prepared;
+		try {
+			prepared = chatMessageService.prepareWithFiles(member, request, files);
+		} catch (CustomException e) {
+			return reject(e.getMessage());
+		}
 		return start(prepared);
+	}
+
+	/**
+	 * SSE 응답 헤더가 선택된 뒤 발생한 예상 가능한 입력 오류는 같은 스트림의 오류 이벤트로
+	 * 반환합니다. JSON 예외 응답으로 형식을 바꾸려 하면 메시지 변환 단계에서 다시 실패해
+	 * 사용자가 원인을 알 수 없는 500 오류를 보게 됩니다.
+	 */
+	private SseEmitter reject(String message) {
+		SseEmitter emitter = new SseEmitter(emitterTimeoutMillis);
+		StreamSession session = new StreamSession(emitter);
+		session.send("error", new ChatStreamErrorResponse(message));
+		session.complete();
+		return emitter;
 	}
 
 	public boolean cancel(Member member, Long aiRunId) {

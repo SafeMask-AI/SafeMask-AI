@@ -43,7 +43,7 @@ class ChatRoomServiceTest {
 		when(chatRoom.getId()).thenReturn(23L);
 		when(chatRoomRepository.findByIdAndMember_IdAndStatus(23L, 7L, ChatRoomStatus.ACTIVE))
 			.thenReturn(Optional.of(chatRoom));
-		when(chatMessageRepository.existsByChatRoom_Id(23L)).thenReturn(false);
+		when(chatMessageRepository.countByChatRoomId(23L)).thenReturn(0L);
 
 		chatRoomService.discardEmptyPreview(member, 23L);
 
@@ -60,7 +60,7 @@ class ChatRoomServiceTest {
 		when(chatRoom.getId()).thenReturn(23L);
 		when(chatRoomRepository.findByIdAndMember_IdAndStatus(23L, 7L, ChatRoomStatus.ACTIVE))
 			.thenReturn(Optional.of(chatRoom));
-		when(chatMessageRepository.existsByChatRoom_Id(23L)).thenReturn(true);
+		when(chatMessageRepository.countByChatRoomId(23L)).thenReturn(1L);
 
 		chatRoomService.discardEmptyPreview(member, 23L);
 

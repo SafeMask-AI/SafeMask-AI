@@ -44,7 +44,7 @@ public class ExpiredPreviewCleanupService {
 			ChatRoomStatus.ACTIVE.name(), cutoff, CLEANUP_BATCH_SIZE);
 
 		for (ChatRoom chatRoom : expiredRooms) {
-			if (chatMessageRepository.existsByChatRoom_Id(chatRoom.getId())) {
+			if (chatMessageRepository.countByChatRoomId(chatRoom.getId()) > 0) {
 				continue;
 			}
 			maskingApprovalService.discardForRoom(chatRoom.getMember(), chatRoom.getId());

@@ -57,6 +57,9 @@
 	};
 	const MAX_FILES_PER_REQUEST = 5;
 	const MAX_FILE_BYTES = 10 * 1024 * 1024;
+	const PREVIEW_DETECTION_SAMPLE_LIMIT = 3;
+	// 긴 첨부는 전체 전송하되 브라우저에는 일부만 렌더링해 확인 창이 멈추지 않게 한다.
+	const MAX_TRANSMISSION_DISPLAY_CHARS = 30_000;
 
 	const MASKING_TYPE_LABELS = {
 		NAME: '이름',
@@ -110,6 +113,15 @@
 	const previewCancelButton = document.getElementById('previewCancelButton');
 	const previewEditButton = document.getElementById('previewEditButton');
 	const previewDownloadButton = document.getElementById('previewDownloadButton');
+	const previewReviewTab = document.getElementById('previewReviewTab');
+	const previewTransmissionTab = document.getElementById('previewTransmissionTab');
+	const previewReviewPanel = document.getElementById('previewReviewPanel');
+	const previewTransmissionPanel = document.getElementById('previewTransmissionPanel');
+	const previewTransmissionStale = document.getElementById('previewTransmissionStale');
+	const previewTransmissionMeta = document.getElementById('previewTransmissionMeta');
+	const previewTransmissionTruncated = document.getElementById('previewTransmissionTruncated');
+	const previewTransmissionText = document.getElementById('previewTransmissionText');
+	const previewCopyButton = document.getElementById('previewCopyButton');
 	const manualMaskValue = document.getElementById('manualMaskValue');
 	const manualMaskType = document.getElementById('manualMaskType');
 	const manualMaskAddButton = document.getElementById('manualMaskAddButton');
@@ -257,6 +269,16 @@
 		resizePreviewPromptInput();
 	});
 	previewDownloadButton.addEventListener('click', downloadMaskingPreview);
+	previewReviewTab.addEventListener('click', function () {
+		selectPreviewTab('review', true);
+	});
+	previewTransmissionTab.addEventListener('click', function () {
+		selectPreviewTab('transmission', true);
+	});
+	[previewReviewTab, previewTransmissionTab].forEach(function (tab) {
+		tab.addEventListener('keydown', handlePreviewTabKeydown);
+	});
+	previewCopyButton.addEventListener('click', copyTransmissionPreview);
 	previewDetailButton.addEventListener('click', function () {
 		if (currentPreviewData) {
 			openMaskingDetailModal(currentPreviewData, currentPreviewTotalCount);
@@ -1018,17 +1040,7 @@
 	/** 답변 원문(마크다운 기호 포함)을 클립보드로 복사한다 */
 	async function copyAnswerText(text, button) {
 		try {
-			if (navigator.clipboard && navigator.clipboard.writeText) {
-				await navigator.clipboard.writeText(text);
-			} else {
-				// 사내망 HTTP 환경 등 clipboard API가 없을 때의 폴백
-				const textarea = document.createElement('textarea');
-				textarea.value = text;
-				document.body.appendChild(textarea);
-				textarea.select();
-				document.execCommand('copy');
-				textarea.remove();
-			}
+			await copyPlainText(text);
 			// 복사 성공 피드백: 아이콘을 잠시 체크 표시로 바꾼다
 			button.innerHTML = CHECK_ICON;
 			button.classList.add('copied');
@@ -1267,9 +1279,124 @@
 		resizePreviewPromptInput();
 		setPreviewFeedback('');
 		renderPreviewDetails(data);
+		renderTransmissionPreview(data);
 		renderManualMasks();
 		updatePreviewApproveButton();
+		updateTransmissionPreviewState();
+		previewDownloadButton.hidden = attachedFiles.length === 0;
+		selectPreviewTab('review');
 		setMaskingPreviewVisible(true);
+	}
+
+	function selectPreviewTab(selectedTab, focusTab) {
+		const transmissionSelected = selectedTab === 'transmission';
+		previewReviewTab.setAttribute('aria-selected', String(!transmissionSelected));
+		previewTransmissionTab.setAttribute('aria-selected', String(transmissionSelected));
+		previewReviewTab.tabIndex = transmissionSelected ? -1 : 0;
+		previewTransmissionTab.tabIndex = transmissionSelected ? 0 : -1;
+		previewReviewPanel.hidden = transmissionSelected;
+		previewTransmissionPanel.hidden = !transmissionSelected;
+		if (focusTab) {
+			(transmissionSelected ? previewTransmissionTab : previewReviewTab).focus();
+		}
+	}
+
+	function handlePreviewTabKeydown(event) {
+		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+			return;
+		}
+		event.preventDefault();
+		selectPreviewTab(event.currentTarget === previewReviewTab ? 'transmission' : 'review', true);
+	}
+
+	/** 서버가 실제 외부 AI 요청용으로 만든 마스킹 문자열을 그대로 표시한다. */
+	function renderTransmissionPreview(data) {
+		const fullText = data.maskedPreview || '';
+		const text = fullText.slice(0, MAX_TRANSMISSION_DISPLAY_CHARS);
+		const detections = data.detections || [];
+		previewTransmissionMeta.textContent = `전송 문자 ${fullText.length.toLocaleString('ko-KR')}자 · 마스킹 ${detections.length.toLocaleString('ko-KR')}건`;
+		const omittedCharacters = fullText.length - text.length;
+		previewTransmissionTruncated.hidden = omittedCharacters === 0;
+		previewTransmissionTruncated.textContent = omittedCharacters > 0
+			? `화면 성능을 위해 앞부분 ${text.length.toLocaleString('ko-KR')}자만 표시합니다. 나머지 ${omittedCharacters.toLocaleString('ko-KR')}자도 실제 전송에는 포함됩니다.`
+			: '';
+		previewTransmissionText.replaceChildren();
+
+		const detectionByToken = new Map();
+		detections.forEach(function (detection) {
+			if (detection.token && !detectionByToken.has(detection.token)) {
+				detectionByToken.set(detection.token, detection);
+			}
+		});
+		const tokens = Array.from(detectionByToken.keys()).sort(function (left, right) {
+			return right.length - left.length;
+		});
+		if (!text || tokens.length === 0 || tokens.length > 1000) {
+			previewTransmissionText.textContent = text || '전송할 내용이 없습니다.';
+			return;
+		}
+
+		try {
+			const tokenPattern = tokens.map(escapeRegExp).join('|');
+			const matcher = new RegExp(tokenPattern, 'g');
+			let cursor = 0;
+			let match;
+			while ((match = matcher.exec(text)) !== null) {
+				previewTransmissionText.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+				const detection = detectionByToken.get(match[0]);
+				const token = document.createElement('mark');
+				token.className = 'transmission-token';
+				token.textContent = match[0];
+				token.title = detection ? `${getMaskingTypeLabel(detection.type, detection)} 마스킹 토큰` : '마스킹 토큰';
+				previewTransmissionText.appendChild(token);
+				cursor = matcher.lastIndex;
+			}
+			previewTransmissionText.appendChild(document.createTextNode(text.slice(cursor)));
+		} catch (error) {
+			// 표시용 강조에 실패해도 실제 전송 문자열은 빠짐없이 확인할 수 있어야 한다.
+			previewTransmissionText.textContent = text;
+		}
+	}
+
+	function escapeRegExp(value) {
+		return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	}
+
+	async function copyTransmissionPreview() {
+		if (!currentPreviewData || (pendingPreview && pendingPreview.dirty)) {
+			return;
+		}
+		const originalLabel = previewCopyButton.textContent;
+		try {
+			await copyPlainText(currentPreviewData.maskedPreview || '');
+			previewCopyButton.textContent = '복사됨';
+		} catch (error) {
+			previewCopyButton.textContent = '복사 실패';
+		} finally {
+			window.setTimeout(function () {
+				previewCopyButton.textContent = originalLabel;
+			}, 1500);
+		}
+	}
+
+	async function copyPlainText(text) {
+		if (navigator.clipboard && navigator.clipboard.writeText) {
+			await navigator.clipboard.writeText(text);
+			return;
+		}
+		// 사내망 HTTP 환경처럼 Clipboard API가 제한되는 브라우저를 위한 폴백이다.
+		const textarea = document.createElement('textarea');
+		textarea.value = text;
+		textarea.setAttribute('readonly', '');
+		textarea.style.position = 'fixed';
+		textarea.style.opacity = '0';
+		document.body.appendChild(textarea);
+		textarea.select();
+		const copied = document.execCommand('copy');
+		textarea.remove();
+		if (!copied) {
+			throw new Error('Clipboard copy was rejected');
+		}
 	}
 
 	function setMaskingPreviewVisible(visible) {
@@ -1322,15 +1449,15 @@
 		sampleList.className = 'preview-sample-list';
 		const original = pendingPreview ? pendingPreview.content : '';
 		const displayDetections = aggregateDetections(detections, original);
-		displayDetections.slice(0, 5).forEach(function (detection) {
+		displayDetections.slice(0, PREVIEW_DETECTION_SAMPLE_LIMIT).forEach(function (detection) {
 			sampleList.appendChild(createDetectionSample(detection, original));
 		});
 		previewText.appendChild(sampleList);
 
-		if (displayDetections.length > 5) {
+		if (displayDetections.length > PREVIEW_DETECTION_SAMPLE_LIMIT) {
 			const sampleMore = document.createElement('p');
 			sampleMore.className = 'preview-sample-more';
-			sampleMore.textContent = `대표 ${Math.min(5, displayDetections.length)}개 항목만 먼저 보여드립니다. 전체 내역은 상세보기에서 확인하세요.`;
+			sampleMore.textContent = `대표 ${Math.min(PREVIEW_DETECTION_SAMPLE_LIMIT, displayDetections.length)}개 항목만 먼저 보여드립니다. 전체 내역은 상세보기에서 확인하세요.`;
 			previewText.appendChild(sampleMore);
 		}
 
@@ -1618,11 +1745,19 @@
 		pendingPreview.dirty = getPreviewPromptContent() !== pendingPreview.approvedContent
 			|| manualMaskSignature() !== pendingPreview.approvedManualMaskSignature;
 		updatePreviewApproveButton();
+		updateTransmissionPreviewState();
 		if (pendingPreview.dirty) {
 			setPreviewFeedback('내용이 변경되었습니다. 전송 전에 변경본을 다시 검사합니다.');
 		} else {
 			setPreviewFeedback('');
 		}
+	}
+
+	function updateTransmissionPreviewState() {
+		const stale = Boolean(pendingPreview && pendingPreview.dirty);
+		previewTransmissionStale.hidden = !stale;
+		previewCopyButton.disabled = stale;
+		previewTransmissionText.classList.toggle('stale', stale);
 	}
 
 	function updatePreviewApproveButton() {
@@ -1632,7 +1767,7 @@
 
 	function resizePreviewPromptInput() {
 		previewPromptInput.style.height = 'auto';
-		previewPromptInput.style.height = `${Math.min(previewPromptInput.scrollHeight, 160)}px`;
+		previewPromptInput.style.height = `${Math.min(previewPromptInput.scrollHeight, 96)}px`;
 	}
 
 	function clearPreviewState(options) {
@@ -1650,6 +1785,15 @@
 		previewPromptInput.value = '';
 		previewPromptInput.style.height = '';
 		previewDetailButton.hidden = true;
+		previewDownloadButton.hidden = true;
+		previewTransmissionMeta.textContent = '';
+		previewTransmissionTruncated.textContent = '';
+		previewTransmissionTruncated.hidden = true;
+		previewTransmissionText.replaceChildren();
+		previewTransmissionStale.hidden = true;
+		previewCopyButton.disabled = false;
+		previewCopyButton.textContent = '전송 내용 복사';
+		selectPreviewTab('review');
 		setPreviewFeedback('');
 		manualMaskValue.value = '';
 		pendingPreview = null;

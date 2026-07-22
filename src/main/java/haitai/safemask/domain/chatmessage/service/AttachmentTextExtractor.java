@@ -1,5 +1,6 @@
 package haitai.safemask.domain.chatmessage.service;
 
+import haitai.safemask.domain.chatmessage.config.AttachmentProcessingProperties;
 import haitai.safemask.domain.fileasset.service.FileUploadPolicy;
 import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
@@ -39,10 +40,8 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class AttachmentTextExtractor {
 
-	private static final int MAX_EXTRACTED_CHARS_PER_FILE = 30_000;
-	private static final int MAX_PDF_PAGES = 300;
-	private static final int MAX_EXCEL_CELLS = 200_000;
 	private final FileUploadPolicy fileUploadPolicy;
+	private final AttachmentProcessingProperties properties;
 
 	public String extract(List<MultipartFile> files) {
 		if (files == null || files.isEmpty()) {
@@ -51,7 +50,7 @@ public class AttachmentTextExtractor {
 		fileUploadPolicy.validate(files);
 
 		StringBuilder builder = new StringBuilder();
-		builder.append("\n\n[첨부 파일]\n");
+		long totalExtractedChars = 0;
 		for (MultipartFile file : files) {
 			if (file == null || file.isEmpty()) {
 				continue;
@@ -61,7 +60,16 @@ public class AttachmentTextExtractor {
 				throw new CustomException(ErrorCode.INVALID_REQUEST,
 					"파일에서 처리할 텍스트를 찾지 못했습니다: " + file.getOriginalFilename());
 			}
-			builder.append("\n--- ").append(file.getOriginalFilename()).append(" ---\n");
+			totalExtractedChars += extracted.length();
+			if (totalExtractedChars > properties.getMaxExtractedCharsPerRequest()) {
+				throw new CustomException(ErrorCode.INVALID_REQUEST,
+					"첨부 파일에서 추출된 전체 내용이 %,d자로 한 번에 처리 가능한 %,d자를 초과했습니다. "
+						.formatted(totalExtractedChars, properties.getMaxExtractedCharsPerRequest())
+						+ "파일 수를 줄이거나 필요한 시트와 범위만 남겨 다시 첨부해 주세요.");
+			}
+			// 파일명은 파일 편집 응답이 정확한 원본을 가리키는 데 필요하다. 다만 일반 헤더와
+			// 장식용 구분선은 AI 입력만 늘리므로 파일별 한 줄 표식으로 간결하게 유지한다.
+			builder.append("\n\n[첨부: ").append(file.getOriginalFilename()).append("]\n");
 			builder.append(extracted).append("\n");
 		}
 		return builder.toString();
@@ -72,11 +80,11 @@ public class AttachmentTextExtractor {
 		String extension = fileUploadPolicy.extensionOf(filename);
 		try {
 			return switch (extension) {
-				case "txt", "csv" -> limit(new String(file.getBytes(), StandardCharsets.UTF_8));
-				case "xlsx" -> limit(extractXlsx(file.getBytes()));
-				case "doc" -> limit(extractDoc(file.getBytes()));
-				case "docx" -> limit(extractDocx(file.getBytes()));
-				case "pdf" -> limit(extractPdf(file.getBytes()));
+				case "txt", "csv" -> limit(new String(file.getBytes(), StandardCharsets.UTF_8), filename);
+				case "xlsx" -> limit(extractXlsx(file.getBytes(), filename), filename);
+				case "doc" -> limit(extractDoc(file.getBytes()), filename);
+				case "docx" -> limit(extractDocx(file.getBytes()), filename);
+				case "pdf" -> limit(extractPdf(file.getBytes(), filename), filename);
 				default -> throw new CustomException(ErrorCode.INVALID_REQUEST);
 			};
 		} catch (IOException e) {
@@ -95,7 +103,7 @@ public class AttachmentTextExtractor {
 	 * (= 민감정보가 탐지 없이 통째로 누락)가 났습니다. POI는 OOXML 표준 전체를
 	 * 해석하므로 이런 표기 차이에 안전합니다.
 	 */
-	private String extractXlsx(byte[] bytes) throws IOException {
+	private String extractXlsx(byte[] bytes, String filename) throws IOException {
 		try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
 			// DataFormatter는 셀의 "표시값"을 그대로 돌려준다 — 문자열로 저장된
 			// 전화번호("010-...")의 앞자리 0이나 하이픈이 숫자 변환으로 훼손되지 않는다
@@ -111,12 +119,16 @@ public class AttachmentTextExtractor {
 				for (Row row : sheet) {
 					StringBuilder line = new StringBuilder();
 					for (Cell cell : row) {
-						if (++visitedCells > MAX_EXCEL_CELLS) throw new CustomException(ErrorCode.INVALID_REQUEST, "엑셀 셀이 너무 많아 처리할 수 없습니다.");
+						if (++visitedCells > properties.getMaxExcelCells()) {
+							throw new CustomException(ErrorCode.INVALID_REQUEST,
+								"엑셀 셀이 너무 많아 처리할 수 없습니다. 필요한 시트나 범위만 남겨 주세요.");
+						}
 						line.append(formatter.formatCellValue(cell)).append('\t');
 					}
 					String lineText = line.toString().stripTrailing();
 					if (!lineText.isEmpty()) {
 						out.append(lineText).append('\n');
+						ensureWithinPerFileLimit(out.length(), filename);
 					}
 				}
 				out.append('\n');
@@ -161,9 +173,11 @@ public class AttachmentTextExtractor {
 	 * 그대로 AI에 보내면 모델이 문서를 읽었다고 오해할 수 있으므로 스캔/OCR 필요 상태로 거절합니다.
 	 * 암호화 PDF는 문서가 허용한 텍스트 추출 권한을 존중합니다.
 	 */
-	private String extractPdf(byte[] bytes) throws IOException {
+	private String extractPdf(byte[] bytes, String filename) throws IOException {
 		try (PDDocument document = Loader.loadPDF(bytes)) {
-			if (document.getNumberOfPages() > MAX_PDF_PAGES) throw new CustomException(ErrorCode.INVALID_REQUEST, "PDF 페이지가 너무 많아 처리할 수 없습니다.");
+			if (document.getNumberOfPages() > properties.getMaxPdfPages()) {
+				throw new CustomException(ErrorCode.INVALID_REQUEST, "PDF 페이지가 너무 많아 처리할 수 없습니다.");
+			}
 			if (document.isEncrypted() && !document.getCurrentAccessPermission().canExtractContent()) {
 				throw new CustomException(ErrorCode.INVALID_REQUEST,
 					"텍스트 추출 권한이 없는 PDF입니다. 권한을 해제한 파일을 다시 첨부해 주세요.");
@@ -180,9 +194,7 @@ public class AttachmentTextExtractor {
 					extracted.append("[페이지 ").append(page).append("]\n")
 						.append(pageText).append("\n\n");
 				}
-				if (extracted.length() > MAX_EXTRACTED_CHARS_PER_FILE) {
-					return limit(extracted.toString());
-				}
+				ensureWithinPerFileLimit(extracted.length(), filename);
 			}
 			if (extracted.isEmpty()) {
 				throw new CustomException(ErrorCode.INVALID_REQUEST,
@@ -210,11 +222,21 @@ public class AttachmentTextExtractor {
 			.trim();
 	}
 
-	private String limit(String text) {
-		if (text.length() <= MAX_EXTRACTED_CHARS_PER_FILE) {
+	private String limit(String text, String filename) {
+		if (text.length() <= properties.getMaxExtractedCharsPerFile()) {
 			return text;
 		}
+		ensureWithinPerFileLimit(text.length(), filename);
+		return text;
+	}
+
+	private void ensureWithinPerFileLimit(int extractedChars, String filename) {
+		if (extractedChars <= properties.getMaxExtractedCharsPerFile()) {
+			return;
+		}
 		throw new CustomException(ErrorCode.INVALID_REQUEST,
-			"파일 내용이 너무 많아 한 번에 처리할 수 없습니다. 필요한 시트나 범위만 남겨 다시 업로드해 주세요.");
+			"'%s'에서 추출된 내용이 %,d자로 파일당 허용량 %,d자를 초과했습니다. "
+				.formatted(filename, extractedChars, properties.getMaxExtractedCharsPerFile())
+				+ "필요한 시트나 범위만 남겨 다시 첨부해 주세요.");
 	}
 }
