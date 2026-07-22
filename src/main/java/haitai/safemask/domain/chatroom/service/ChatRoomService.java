@@ -78,7 +78,7 @@ public class ChatRoomService {
 		ChatRoom chatRoom = chatRoomRepository.findByIdAndMember_IdAndStatus(chatRoomId, member.getId(),
 				ChatRoomStatus.ACTIVE)
 			.orElseThrow(() -> new CustomException(ErrorCode.NOT_FOUND));
-		if (chatMessageRepository.existsByChatRoom_Id(chatRoom.getId())) {
+		if (chatMessageRepository.countByChatRoomId(chatRoom.getId()) > 0) {
 			return;
 		}
 		maskingApprovalService.discardForRoom(member, chatRoom.getId());

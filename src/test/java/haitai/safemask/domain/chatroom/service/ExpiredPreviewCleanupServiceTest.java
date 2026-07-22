@@ -43,7 +43,7 @@ class ExpiredPreviewCleanupServiceTest {
 		ChatRoom emptyRoom = room(member, 31L);
 		when(chatRoomRepository.findExpiredEmptyRooms(eq(ChatRoomStatus.ACTIVE.name()),
 			any(LocalDateTime.class), eq(100))).thenReturn(List.of(emptyRoom));
-		when(chatMessageRepository.existsByChatRoom_Id(31L)).thenReturn(false);
+		when(chatMessageRepository.countByChatRoomId(31L)).thenReturn(0L);
 
 		service.cleanup();
 
@@ -61,7 +61,7 @@ class ExpiredPreviewCleanupServiceTest {
 		ChatRoom room = room(member(7L), 31L);
 		when(chatRoomRepository.findExpiredEmptyRooms(eq(ChatRoomStatus.ACTIVE.name()),
 			any(LocalDateTime.class), eq(100))).thenReturn(List.of(room));
-		when(chatMessageRepository.existsByChatRoom_Id(31L)).thenReturn(true);
+		when(chatMessageRepository.countByChatRoomId(31L)).thenReturn(1L);
 
 		service.cleanup();
 
