@@ -3,6 +3,7 @@ package haitai.safemask.domain.chatmessage.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import haitai.safemask.domain.chatmessage.config.AttachmentProcessingProperties;
 import haitai.safemask.domain.fileasset.service.FileUploadPolicy;
 import haitai.safemask.global.exception.CustomException;
 import java.io.ByteArrayOutputStream;
@@ -34,7 +35,8 @@ import org.springframework.web.multipart.MultipartFile;
  */
 class AttachmentTextExtractorTest {
 
-	private final AttachmentTextExtractor extractor = new AttachmentTextExtractor(new FileUploadPolicy());
+	private final AttachmentTextExtractor extractor = new AttachmentTextExtractor(
+		new FileUploadPolicy(), new AttachmentProcessingProperties());
 
 	@Test
 	@DisplayName("xlsx의 문자열·숫자 셀이 추출되고, 셀은 탭·행은 줄바꿈으로 구분된다")
@@ -51,6 +53,8 @@ class AttachmentTextExtractorTest {
 		assertThat(extracted).contains("이름\t휴대폰");
 		assertThat(extracted).contains("김민준\t010-2345-6789");
 		assertThat(extracted).doesNotContain("휴대폰\t김민준");
+		assertThat(extracted).contains("[첨부: test.xlsx]");
+		assertThat(extracted).doesNotContain("[첨부 파일]", "--- test.xlsx ---");
 	}
 
 	@Test
@@ -70,6 +74,28 @@ class AttachmentTextExtractorTest {
 		// 첫 시트만 읽으면 뒤 시트의 민감정보가 통째로 누락된다 — 전부 있어야 한다
 		assertThat(extracted).contains("[시트: 안내]", "[시트: 고객명단]", "[시트: 상담기록]");
 		assertThat(extracted).contains("박지훈", "010-1111-2222", "이서연", "010-3333-4444");
+	}
+
+	@Test
+	@DisplayName("3만 자를 넘는 400행 업무용 xlsx도 새 파일 한도 안에서는 전체 추출된다")
+	void extractsFourHundredBusinessRows() throws IOException {
+		String[][] rows = new String[401][8];
+		for (int column = 0; column < rows[0].length; column++) {
+			rows[0][column] = "업무 항목 " + column;
+		}
+		for (int row = 1; row < rows.length; row++) {
+			for (int column = 0; column < rows[row].length; column++) {
+				rows[row][column] = "스위트제로 프로젝트 업무 데이터 %03d-%02d".formatted(row, column);
+			}
+		}
+		byte[] xlsx = buildXlsx(rows);
+
+		String extracted = extractor.extract(List.of(new MockMultipartFile(
+			"files", "업무목록.xlsx", "application/vnd.ms-excel", xlsx)));
+
+		assertThat(extracted.length()).isGreaterThan(30_000);
+		assertThat(extracted).contains("스위트제로 프로젝트 업무 데이터 001-00");
+		assertThat(extracted).contains("스위트제로 프로젝트 업무 데이터 400-07");
 	}
 
 	@Test
@@ -156,12 +182,27 @@ class AttachmentTextExtractorTest {
 	@Test
 	@DisplayName("추출 텍스트가 너무 긴 파일은 앞부분만 보내지 않고 거절한다")
 	void rejectsOversizedExtractedText() {
-		String text = "가".repeat(30_001);
+		String text = "가".repeat(120_001);
 
 		assertThatThrownBy(() -> extractor.extract(List.of(
 			new MockMultipartFile("files", "long.txt", "text/plain", text.getBytes(StandardCharsets.UTF_8)))))
 			.isInstanceOf(CustomException.class)
-			.hasMessageContaining("파일 내용이 너무 많아");
+			.hasMessageContaining("120,001자")
+			.hasMessageContaining("120,000자");
+	}
+
+	@Test
+	@DisplayName("파일별 한도 안이어도 여러 파일의 추출 내용 합계가 요청 한도를 넘으면 거절한다")
+	void rejectsOversizedCombinedExtractedText() {
+		MockMultipartFile first = new MockMultipartFile(
+			"files", "first.txt", "text/plain", "가".repeat(100_000).getBytes(StandardCharsets.UTF_8));
+		MockMultipartFile second = new MockMultipartFile(
+			"files", "second.txt", "text/plain", "나".repeat(80_001).getBytes(StandardCharsets.UTF_8));
+
+		assertThatThrownBy(() -> extractor.extract(List.of(first, second)))
+			.isInstanceOf(CustomException.class)
+			.hasMessageContaining("전체 내용이 180,001자")
+			.hasMessageContaining("180,000자");
 	}
 
 	// ==== 테스트 데이터 ====

@@ -125,46 +125,74 @@
 				</div>
 				<button type="button" class="preview-close" id="previewCancelButton" aria-label="마스킹 확인 취소">&times;</button>
 			</div>
-			<div class="preview-detail" id="previewText"></div>
-			<label class="preview-prompt-editor" for="previewPromptInput">
-				<span>AI 요청 내용</span>
-				<textarea id="previewPromptInput" rows="3" placeholder="AI에게 보낼 요청 내용을 수정할 수 있습니다."></textarea>
-			</label>
-			<p class="preview-feedback" id="previewFeedback" role="alert" hidden></p>
-			<button type="button" class="preview-detail-toggle" id="previewDetailButton" hidden>상세보기</button>
-			<div class="manual-mask">
-				<input type="text" id="manualMaskValue" placeholder="추가로 가릴 단어를 입력하세요">
-				<select id="manualMaskType">
-					<option value="CUSTOM">사용자 지정</option>
-					<option value="NAME">이름</option>
-					<option value="PHONE">전화번호</option>
-					<option value="EMAIL">이메일</option>
-					<option value="RRN">주민/외국인등록번호</option>
-					<option value="CARD_NUMBER">카드번호</option>
-					<option value="ADDRESS">주소</option>
-					<option value="EMPLOYEE_NO">사번</option>
-					<option value="ACCOUNT_NUMBER">계좌번호</option>
-					<option value="IP">IP 주소</option>
-					<option value="PASSPORT">여권번호</option>
-					<option value="DRIVER_LICENSE">운전면허번호</option>
-					<option value="VEHICLE_NUMBER">차량번호</option>
-					<option value="FINANCIAL_RESULT">공시 전 재무/실적</option>
-					<option value="COST_PRICE">원가/가격 정보</option>
-					<option value="CONTRACT_AMOUNT">계약/거래 조건</option>
-					<option value="LEGAL_DOCUMENT">법무/소송 정보</option>
-					<option value="TRADE_SECRET">영업비밀/전략</option>
-					<option value="TECH_IDENTIFIER">기술/인프라 정보</option>
-					<option value="SQL_QUERY">SQL 쿼리 정보</option>
-					<option value="SECURITY_SECRET">보안 시크릿</option>
-					<option value="HR_COMPENSATION">인사/급여 정보</option>
-					<option value="CUSTOMER_ACCOUNT">고객/거래처 정보</option>
-					<option value="INTERNAL_DOC_ID">내부 문서/관리번호</option>
-				</select>
-				<button type="button" class="secondary-button" id="manualMaskAddButton">추가</button>
+			<div class="preview-tabs" role="tablist" aria-label="마스킹 확인 항목">
+				<button type="button" id="previewReviewTab" role="tab" aria-selected="true"
+					aria-controls="previewReviewPanel">탐지 내역</button>
+				<button type="button" id="previewTransmissionTab" role="tab" aria-selected="false"
+					aria-controls="previewTransmissionPanel">AI 전송 내용</button>
 			</div>
-			<ul class="manual-mask-list" id="manualMaskList"></ul>
+			<div id="previewReviewPanel" role="tabpanel" aria-labelledby="previewReviewTab">
+				<div class="preview-detail" id="previewText"></div>
+				<label class="preview-prompt-editor" for="previewPromptInput">
+					<span>AI 요청 내용</span>
+					<textarea id="previewPromptInput" rows="3" placeholder="AI에게 보낼 요청 내용을 수정할 수 있습니다."></textarea>
+				</label>
+				<p class="preview-feedback" id="previewFeedback" role="alert" hidden></p>
+				<button type="button" class="preview-detail-toggle" id="previewDetailButton" hidden>상세보기</button>
+				<div class="manual-mask">
+					<input type="text" id="manualMaskValue" placeholder="추가로 가릴 단어를 입력하세요">
+					<select id="manualMaskType">
+						<option value="CUSTOM">사용자 지정</option>
+						<option value="NAME">이름</option>
+						<option value="PHONE">전화번호</option>
+						<option value="EMAIL">이메일</option>
+						<option value="RRN">주민/외국인등록번호</option>
+						<option value="CARD_NUMBER">카드번호</option>
+						<option value="ADDRESS">주소</option>
+						<option value="EMPLOYEE_NO">사번</option>
+						<option value="ACCOUNT_NUMBER">계좌번호</option>
+						<option value="IP">IP 주소</option>
+						<option value="PASSPORT">여권번호</option>
+						<option value="DRIVER_LICENSE">운전면허번호</option>
+						<option value="VEHICLE_NUMBER">차량번호</option>
+						<option value="FINANCIAL_RESULT">공시 전 재무/실적</option>
+						<option value="COST_PRICE">원가/가격 정보</option>
+						<option value="CONTRACT_AMOUNT">계약/거래 조건</option>
+						<option value="LEGAL_DOCUMENT">법무/소송 정보</option>
+						<option value="TRADE_SECRET">영업비밀/전략</option>
+						<option value="TECH_IDENTIFIER">기술/인프라 정보</option>
+						<option value="SQL_QUERY">SQL 쿼리 정보</option>
+						<option value="SECURITY_SECRET">보안 시크릿</option>
+						<option value="HR_COMPENSATION">인사/급여 정보</option>
+						<option value="CUSTOMER_ACCOUNT">고객/거래처 정보</option>
+						<option value="INTERNAL_DOC_ID">내부 문서/관리번호</option>
+					</select>
+					<button type="button" class="secondary-button" id="manualMaskAddButton">추가</button>
+				</div>
+				<ul class="manual-mask-list" id="manualMaskList"></ul>
+			</div>
+			<div class="preview-transmission" id="previewTransmissionPanel" role="tabpanel"
+				aria-labelledby="previewTransmissionTab" hidden>
+				<div class="transmission-assurance">
+					<span aria-hidden="true">&#10003;</span>
+					<div>
+						<strong>현재 요청에서 이 마스킹본만 외부 AI로 전달됩니다.</strong>
+						<p>첨부 원본은 사내 서버에 남고, 탐지된 값은 안전한 토큰으로 바뀝니다.</p>
+					</div>
+				</div>
+				<p class="transmission-stale" id="previewTransmissionStale" role="status" hidden>
+					요청 내용이 변경되었습니다. 변경 내용을 다시 검사하면 최신 전송본으로 갱신됩니다.
+				</p>
+				<div class="transmission-toolbar">
+					<span id="previewTransmissionMeta"></span>
+					<button type="button" class="secondary-button" id="previewCopyButton">전송 내용 복사</button>
+				</div>
+				<p class="transmission-truncated" id="previewTransmissionTruncated" role="status" hidden></p>
+				<pre class="transmission-content" id="previewTransmissionText" tabindex="0"></pre>
+				<p class="transmission-context-note">이전 대화가 있는 경우, 대화 문맥에는 이전에 마스킹된 메시지도 함께 포함될 수 있습니다.</p>
+			</div>
 			<div class="preview-actions">
-				<button type="button" class="secondary-button" id="previewDownloadButton">미리보기 다운로드</button>
+				<button type="button" class="secondary-button" id="previewDownloadButton" hidden>마스킹 파일 받기</button>
 				<button type="button" class="secondary-button" id="previewEditButton">다시 수정</button>
 				<button type="button" class="primary-button" id="previewApproveButton">마스킹하고 전송</button>
 			</div>

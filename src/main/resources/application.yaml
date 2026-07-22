@@ -68,6 +68,13 @@ safemask:
     request-timeout: ${OPENAI_REQUEST_TIMEOUT:180s}
     # AI 요청은 연결이 끊겨도 서버에서 마무리하므로 API 타임아웃보다 여유 있게 둡니다.
     sse-timeout: ${AI_SSE_TIMEOUT:210s}
+  attachment:
+    # 압축된 Office 파일은 바이트 크기보다 훨씬 많은 텍스트가 나올 수 있어 추출 결과도 제한합니다.
+    # 한도 초과 내용을 잘라 AI에 보내면 민감정보·업무 행이 누락될 수 있으므로 요청 전체를 거절합니다.
+    max-extracted-chars-per-file: ${ATTACHMENT_MAX_CHARS_PER_FILE:120000}
+    max-extracted-chars-per-request: ${ATTACHMENT_MAX_CHARS_PER_REQUEST:180000}
+    max-excel-cells: ${ATTACHMENT_MAX_EXCEL_CELLS:200000}
+    max-pdf-pages: ${ATTACHMENT_MAX_PDF_PAGES:300}
   masking:
     mapping-ttl: ${MASKING_MAPPING_TTL:24h}
     # 미리보기 승인 ID와 승인 스냅샷의 유효시간. 만료되면 다시 검사해야 합니다.
