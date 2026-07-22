@@ -139,7 +139,7 @@ public class AuthController {
 		return ResponseEntity.ok()
 			.header(HttpHeaders.SET_COOKIE,
 				createRefreshTokenCookie(result.refreshToken(), Boolean.parseBoolean(rememberLogin)).toString())
-			.body(new TokenRefreshResponse(result.accessToken()));
+			.body(result.response());
 	}
 
 	// ==================== 로그아웃 ====================

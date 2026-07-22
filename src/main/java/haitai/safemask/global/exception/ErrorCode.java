@@ -21,6 +21,17 @@ public enum ErrorCode {
 		"마스킹 확인이 만료되었거나 이미 사용되었습니다. 내용을 다시 검사해 주세요."),
 	MASKING_APPROVAL_FILE_CHANGED(HttpStatus.CONFLICT, "MASKING_409_2",
 		"확인한 첨부 파일과 현재 파일이 다릅니다. 파일을 다시 검사해 주세요."),
+	MASKING_RULE_NOT_FOUND(HttpStatus.NOT_FOUND, "MASKING_RULE_404_1", "마스킹 규칙을 찾을 수 없습니다."),
+	MASKING_RULE_DUPLICATE(HttpStatus.CONFLICT, "MASKING_RULE_409_1", "같은 이름의 마스킹 규칙이 이미 존재합니다."),
+	MASKING_RULE_VERSION_CONFLICT(HttpStatus.CONFLICT, "MASKING_RULE_409_2",
+		"다른 관리자가 먼저 규칙을 변경했습니다. 최신 내용을 다시 불러와 주세요."),
+	MASKING_RULE_SYSTEM_IMMUTABLE(HttpStatus.FORBIDDEN, "MASKING_RULE_403_1",
+		"필수 시스템 마스킹 규칙은 변경하거나 비활성화할 수 없습니다."),
+	MASKING_RULE_INVALID(HttpStatus.BAD_REQUEST, "MASKING_RULE_400_1", "안전하게 적용할 수 없는 마스킹 규칙입니다."),
+	MASKING_RULE_TEST_REQUIRED(HttpStatus.CONFLICT, "MASKING_RULE_409_3",
+		"현재 규칙을 샘플 문장으로 테스트한 뒤 활성화해 주세요."),
+	MASKING_RULES_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "MASKING_RULE_503_1",
+		"보호 규칙을 안전하게 불러오지 못해 AI 요청을 중단했습니다."),
 
 	// ===== 인증(Auth) =====
 	// 로그인 실패 시 사번 존재 여부와 비밀번호 오류를 구분해서 알려주면

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>마스킹 규칙 관리 | SafeMask</title>
+<script th:src="@{/js/theme.js}"></script>
+<link rel="stylesheet" th:href="@{/css/admin.css}"></head>
+<body><button type="button" class="theme-toggle-floating" data-theme-toggle></button><div class="layout">
+<aside><a class="brand" href="/admin"><img th:src="@{/images/haitai-logo.jpg}" alt="해태"><span><small>HAITAI SECURE AI</small><b>SafeMask</b></span></a>
+<nav><a href="/admin">✓ 회원 승인 관리</a><a class="active" href="/admin/rules">⌘ 마스킹 규칙 관리</a></nav>
+<div class="profile"><i id="adminAvatar"></i><span><b id="adminName"></b><small>SafeMask 관리자</small></span><button id="adminLogoutButton" class="logout" type="button">로그아웃</button></div></aside>
+<main><header><div><em>MASKING POLICY</em><h1>마스킹 규칙 관리</h1><p>기본 보호 규칙은 유지하면서 회사 고유 키워드와 제한된 정규식을 추가할 수 있습니다.</p></div><button id="newRuleButton" class="primary" type="button">새 규칙 만들기</button></header>
+<section class="rule-notice"><b>안전한 적용 순서</b><span>규칙을 저장하면 비활성 초안으로 생성됩니다. 샘플 문장으로 결과를 확인한 뒤 활성화하세요.</span></section>
+<section class="panel"><div class="toolbar"><div><h2>등록된 규칙</h2><p>시스템 규칙은 보호를 위해 조회만 가능합니다.</p></div><form id="ruleSearchForm"><select id="ruleStatus" aria-label="규칙 상태"><option value="ALL">전체</option><option value="SYSTEM">시스템</option><option value="ACTIVE">사용자 활성</option><option value="INACTIVE">사용자 비활성</option></select><input id="ruleKeyword" type="search" placeholder="이름 또는 설명 검색"><button>검색</button></form></div>
+<p id="ruleFeedback" role="status" hidden></p><div class="table"><table class="rules-table"><thead><tr><th>규칙</th><th>분류</th><th>탐지 방식</th><th>우선순위</th><th>상태</th><th>관리</th></tr></thead><tbody id="ruleTableBody"></tbody></table><div id="ruleEmptyState" class="empty" hidden><i>⌘</i><b>조건에 맞는 규칙이 없습니다.</b><span>검색 조건을 바꾸거나 새 사용자 규칙을 만들어 보세요.</span></div></div></section></main></div>
+
+<div id="ruleEditor" class="modal rule-editor" hidden><div data-close-editor></div><section role="dialog" aria-modal="true" aria-labelledby="ruleEditorTitle"><h2 id="ruleEditorTitle">새 마스킹 규칙</h2><p>저장 후에는 반드시 샘플 테스트를 수행하고 활성화하세요.</p><form id="ruleForm">
+<input id="ruleId" type="hidden"><input id="ruleVersion" type="hidden">
+<label>규칙 이름<input id="ruleName" required maxlength="100" placeholder="예: 프로젝트 코드명"></label>
+<div class="form-row"><label>마스킹 분류<select id="ruleType" required></select></label><label>탐지 방식<select id="ruleKind" required><option value="KEYWORD">키워드 (권장)</option><option value="REGEX">제한된 정규식</option></select></label></div>
+<label>탐지값<textarea id="rulePattern" required maxlength="500" rows="3" placeholder="외부로 나가면 안 되는 키워드"></textarea><small id="patternHelp">입력한 문구를 글자 그대로 탐지합니다.</small></label>
+<div class="form-row"><label>우선순위<input id="rulePriority" type="number" min="1000" max="9999" value="5000" required></label><label>변경 사유<input id="ruleReason" required maxlength="300" placeholder="등록 또는 변경 이유"></label></div>
+<label>설명<textarea id="ruleDescription" maxlength="500" rows="2" placeholder="운영자가 알아야 할 적용 범위"></textarea></label>
+<footer><button id="editorCancelButton" type="button">취소</button><button class="primary" type="submit">비활성 상태로 저장</button></footer></form></section></div>
+
+<div id="ruleDetail" class="modal rule-detail" hidden><div data-close-detail></div><section role="dialog" aria-modal="true" aria-labelledby="ruleDetailTitle"><h2 id="ruleDetailTitle">규칙 확인</h2><p id="ruleDetailMeta"></p><p id="ruleTestStatus" class="rule-test-status"></p><label>샘플 문장<textarea id="sampleText" maxlength="5000" rows="5" placeholder="민감정보가 포함된 샘플 문장을 입력하세요."></textarea></label><button id="testRuleButton" class="secondary" type="button">이 규칙만 테스트</button><div id="testResult" class="test-result" hidden><b>마스킹 결과</b><pre id="maskedText"></pre><small id="detectionCount"></small></div><div class="audit"><b>최근 변경 이력</b><ul id="auditList"></ul></div><footer><button id="detailCloseButton" type="button">닫기</button><button id="editRuleButton" type="button">수정</button><button id="toggleRuleButton" class="primary" type="button"></button></footer></section></div>
+
+<div id="stateConfirmModal" class="modal state-confirm" hidden><div data-close-confirm></div><section role="dialog" aria-modal="true" aria-labelledby="stateConfirmTitle"><i>!</i><h2 id="stateConfirmTitle"></h2><p id="stateConfirmMessage"></p><label class="confirm-reason">변경 사유<input id="stateReason" maxlength="300" placeholder="활성화 또는 비활성화 이유"></label><p id="stateError" class="modal-error" role="alert" hidden></p><footer><button id="stateCancelButton" type="button">취소</button><button id="stateConfirmButton" class="primary" type="button">확인</button></footer></section></div>
+<script th:src="@{/js/admin-shell.js}"></script><script th:src="@{/js/admin-rules.js}"></script></body></html>

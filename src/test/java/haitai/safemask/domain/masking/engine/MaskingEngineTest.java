@@ -1,12 +1,16 @@
 package haitai.safemask.domain.masking.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import haitai.safemask.domain.masking.dto.Detection;
 import haitai.safemask.domain.masking.dto.MaskingResult;
 import haitai.safemask.domain.maskingentity.enums.MaskingType;
 import haitai.safemask.domain.maskingrule.entity.MaskingRule;
+import haitai.safemask.domain.maskingrule.enums.MaskingRuleKind;
 import haitai.safemask.domain.maskingrule.service.MaskingRuleSeeder;
+import haitai.safemask.domain.member.entity.Member;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
@@ -47,6 +51,22 @@ class MaskingEngineTest {
 	 */
 	private MaskingResult mask(String text) {
 		return engine.mask(text, rules, assigner, DetectionPolicies.standard(text, GIVEN_NAMES));
+	}
+
+	@Test
+	@DisplayName("사용자 키워드의 정규식 특수문자를 글자 그대로 탐지한다")
+	void customKeywordTreatsRegexMetacharactersLiterally() {
+		Member administrator = mock(Member.class);
+		when(administrator.getId()).thenReturn(1L);
+		when(administrator.getName()).thenReturn("관리자");
+		MaskingRule rule = MaskingRule.createCustom("프로젝트 코드", MaskingType.CUSTOM,
+			MaskingRuleKind.KEYWORD, "ALPHA.(2026)+", 5000, null, administrator);
+
+		MaskingResult result = engine.mask("코드는 ALPHA.(2026)+ 입니다", List.of(rule), assigner);
+
+		assertThat(result.detections()).hasSize(1);
+		assertThat(result.detections().get(0).originalValue()).isEqualTo("ALPHA.(2026)+");
+		assertThat(result.maskedText()).doesNotContain("ALPHA.(2026)+");
 	}
 
 	@Nested

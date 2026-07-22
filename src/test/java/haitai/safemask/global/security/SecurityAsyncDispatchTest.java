@@ -42,11 +42,17 @@ class SecurityAsyncDispatchTest {
 		JwtTokenProvider tokenProvider = mock(JwtTokenProvider.class);
 		MemberRepository memberRepository = mock(MemberRepository.class);
 		Member member = mock(Member.class);
+		Member administrator = mock(Member.class);
 		when(tokenProvider.validateToken("valid-token")).thenReturn(true);
 		when(tokenProvider.getMemberIdFromToken("valid-token")).thenReturn(1L);
+		when(tokenProvider.validateToken("admin-token")).thenReturn(true);
+		when(tokenProvider.getMemberIdFromToken("admin-token")).thenReturn(2L);
 		when(memberRepository.findById(1L)).thenReturn(Optional.of(member));
+		when(memberRepository.findById(2L)).thenReturn(Optional.of(administrator));
 		when(member.isApproved()).thenReturn(true);
 		when(member.getRole()).thenReturn(MemberRole.USER);
+		when(administrator.isApproved()).thenReturn(true);
+		when(administrator.getRole()).thenReturn(MemberRole.ADMIN);
 
 		context = new AnnotationConfigWebApplicationContext();
 		context.setServletContext(new MockServletContext());
@@ -97,6 +103,26 @@ class SecurityAsyncDispatchTest {
 			.andExpect(forwardedUrl("/error/not-found"));
 	}
 
+	@Test
+	void administratorCannotUseChatOrFileApis() throws Exception {
+		mockMvc.perform(get("/api/chat/test")
+				.header("Authorization", "Bearer admin-token"))
+			.andExpect(status().isForbidden());
+		mockMvc.perform(get("/api/files/test")
+				.header("Authorization", "Bearer admin-token"))
+			.andExpect(status().isForbidden());
+	}
+
+	@Test
+	void userCannotUseAdminApiButAdministratorCan() throws Exception {
+		mockMvc.perform(get("/api/admin/test")
+				.header("Authorization", "Bearer valid-token"))
+			.andExpect(status().isForbidden());
+		mockMvc.perform(get("/api/admin/test")
+				.header("Authorization", "Bearer admin-token"))
+			.andExpect(status().isOk());
+	}
+
 	@EnableWebMvc
 	static class AsyncControllerConfig {
 
@@ -111,6 +137,11 @@ class SecurityAsyncDispatchTest {
 			@GetMapping("/test/async")
 			Callable<String> async() {
 				return () -> "ok";
+			}
+
+			@GetMapping({"/api/chat/test", "/api/files/test", "/api/admin/test"})
+			String protectedResource() {
+				return "ok";
 			}
 		}
 	}

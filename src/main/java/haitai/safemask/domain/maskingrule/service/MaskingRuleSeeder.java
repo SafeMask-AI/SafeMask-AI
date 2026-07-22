@@ -22,7 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <ul>
  *   <li>이름이 같은 규칙이 이미 있으면 패턴·우선순위·설명을 코드 기준으로 갱신합니다.
  *       (규칙 개선이 배포되면 재기동만으로 반영되도록)</li>
- *   <li>단, 관리자가 끈 규칙(enabled=false)은 다시 켜지 않습니다.</li>
+	 *   <li>필수 규칙은 관리 설정 오류로 꺼져 있더라도 다시 활성화합니다.</li>
  *   <li>관리자가 다른 이름으로 추가한 커스텀 규칙은 건드리지 않습니다.</li>
  * </ul>
  *
@@ -138,6 +138,7 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 		SQL_IDENTIFIER_PATTERN + "(?:\\." + SQL_IDENTIFIER_PATTERN + ")?(?:@" + SQL_IDENTIFIER_PATTERN + ")?";
 
 	private final MaskingRuleRepository maskingRuleRepository;
+	private final MaskingRuleService maskingRuleService;
 
 	@Override
 	@Transactional
@@ -158,6 +159,7 @@ public class MaskingRuleSeeder implements ApplicationRunner {
 				updated++;
 			}
 		}
+		maskingRuleService.invalidateActiveRuleCache();
 		log.info("기본 마스킹 규칙 동기화 완료: 신규 {}건, 갱신 {}건", inserted, updated);
 	}
 
