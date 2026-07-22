@@ -14,6 +14,6 @@ class AdminEmptyStateStyleTest {
 		String css = new ClassPathResource("static/css/admin.css")
 			.getContentAsString(StandardCharsets.UTF_8);
 
-		assertThat(css).contains(".empty[hidden]{display:none}");
+		assertThat(css.replaceAll("\\s+", "")).contains(".empty[hidden]{display:none;}");
 	}
 }

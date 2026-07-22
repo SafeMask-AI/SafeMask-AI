@@ -69,7 +69,7 @@ public class SecurityConfig {
 				.requestMatchers("/api/auth/**").permitAll()
 				// Thymeleaf 화면(로그인/회원가입)과 정적 리소스 (필요 시 경로 추가)
 				.requestMatchers("/", "/login", "/signup", "/account/pending", "/account/rejected",
-					"/chat", "/admin", "/admin/rules", "/css/**", "/js/**", "/images/**",
+					"/chat", "/admin", "/admin/rules", "/admin/monitoring", "/css/**", "/js/**", "/images/**",
 					"/favicon.ico", "/error", "/error/**").permitAll()
 				// 관리자 전용 API
 				.requestMatchers("/api/admin/**").hasRole("ADMIN")
