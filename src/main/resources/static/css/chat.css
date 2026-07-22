@@ -486,9 +486,15 @@ body.modal-open .sidebar {
 }
 
 .onboarding .center-logo {
-	width: 48px;
-	height: 48px;
+	width: 106px;
+	height: 54px;
+	padding: 7px 11px;
+	border: 1px solid #f0dce5;
+	border-radius: 15px;
+	background: #ffffff;
+	box-shadow: 0 8px 22px rgba(116, 49, 78, 0.09);
 	object-fit: contain;
+	object-position: center;
 	margin-bottom: 28px;
 }
 
@@ -806,12 +812,16 @@ body.modal-open .sidebar {
 }
 
 .masking-brand-mark {
-	width: 70px;
+	width: 84px;
 	height: 38px;
 	flex: 0 0 auto;
-	object-fit: cover;
+	padding: 5px 8px;
+	border: 1px solid #f0dce5;
+	border-radius: 10px;
+	background: #fffafd;
+	box-shadow: 0 4px 12px rgba(116, 49, 78, 0.07);
+	object-fit: contain;
 	object-position: center;
-	mix-blend-mode: multiply;
 }
 
 .masking-brand-divider {
@@ -1686,11 +1696,15 @@ body.modal-open .sidebar {
 }
 
 .confirm-brand img {
-	width: 68px;
-	height: 34px;
-	object-fit: cover;
+	width: 82px;
+	height: 38px;
+	padding: 5px 8px;
+	border: 1px solid #f0dce5;
+	border-radius: 10px;
+	background: #fffafd;
+	box-shadow: 0 4px 12px rgba(116, 49, 78, 0.07);
+	object-fit: contain;
 	object-position: center;
-	mix-blend-mode: multiply;
 }
 
 .confirm-brand-divider {
@@ -2603,7 +2617,9 @@ html[data-theme='dark'] .protection-popover {
 /* ---- 온보딩 ---- */
 
 html[data-theme='dark'] .onboarding .center-logo {
-	filter: brightness(0.92);
+	border-color: #513f4a;
+	background: linear-gradient(145deg, #3b3038, #30272f);
+	box-shadow: 0 9px 24px rgba(0, 0, 0, 0.28);
 }
 
 html[data-theme='dark'] .usage-guide-button {
@@ -2656,8 +2672,9 @@ html[data-theme='dark'] .masking-preview-backdrop {
 }
 
 html[data-theme='dark'] .masking-brand-mark {
-	filter: brightness(0.92);
-	border-radius: 8px;
+	border-color: #513f4a;
+	background: linear-gradient(145deg, #3b3038, #30272f);
+	box-shadow: 0 5px 14px rgba(0, 0, 0, 0.24);
 }
 
 html[data-theme='dark'] .masking-brand-divider {
@@ -2902,9 +2919,9 @@ html[data-theme='dark'] .confirm-dialog {
 }
 
 html[data-theme='dark'] .confirm-brand img {
-	filter: brightness(0.92);
-	border-radius: 6px;
-	mix-blend-mode: normal;
+	border-color: #513f4a;
+	background: linear-gradient(145deg, #3b3038, #30272f);
+	box-shadow: 0 5px 14px rgba(0, 0, 0, 0.24);
 }
 
 html[data-theme='dark'] .confirm-brand-divider {
