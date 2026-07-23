@@ -1,0 +1,26 @@
+[Unit]
+Description=SafeMask AI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=safemask
+Group=safemask
+WorkingDirectory=/opt/safemask
+# 실제 비밀값은 이 예제나 Git 저장소가 아니라 권한 600의 외부 파일 또는 AWS 비밀 저장소에서 주입합니다.
+EnvironmentFile=/etc/safemask/safemask.env
+Environment=SPRING_PROFILES_ACTIVE=prod
+ExecStart=/usr/bin/java -jar /opt/safemask/safemask.jar
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/safemask/files
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

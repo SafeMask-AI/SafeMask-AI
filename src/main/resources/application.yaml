@@ -56,6 +56,21 @@ server:
 #   기본값은 프로젝트 내부가 아니라 OS 임시 디렉터리입니다. 운영 환경은
 #   FILE_STORAGE_PATH로 프로젝트 밖의 전용 보안 저장소를 지정하세요.
 safemask:
+  # Refresh Token은 HttpOnly·SameSite=Strict를 유지하고, Secure 속성만 환경별로 분리합니다.
+  # prod 프로필은 application-prod.yaml에서 기본 true이며 false로 내리면 기동 검증이 실패합니다.
+  auth:
+    cookie:
+      secure: ${AUTH_COOKIE_SECURE:false}
+    protection:
+      enabled: ${AUTH_REQUEST_PROTECTION_ENABLED:true}
+      login-limit: ${AUTH_LOGIN_RATE_LIMIT:10}
+      login-window: ${AUTH_LOGIN_RATE_WINDOW:5m}
+      signup-limit: ${AUTH_SIGNUP_RATE_LIMIT:5}
+      signup-window: ${AUTH_SIGNUP_RATE_WINDOW:1h}
+      duplicate-check-limit: ${AUTH_DUPLICATE_RATE_LIMIT:30}
+      duplicate-check-window: ${AUTH_DUPLICATE_RATE_WINDOW:1m}
+      refresh-limit: ${AUTH_REFRESH_RATE_LIMIT:30}
+      refresh-window: ${AUTH_REFRESH_RATE_WINDOW:5m}
   admin:
     # 최초 설치에서 관리자 계정이 하나도 없을 때만 기존 회원 사번을 ADMIN/APPROVED로 승격합니다.
     # 첫 관리자 생성 후에는 환경변수를 제거하세요. 기존 관리자가 있으면 이 값은 무시됩니다.

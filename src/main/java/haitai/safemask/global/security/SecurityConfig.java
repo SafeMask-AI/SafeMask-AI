@@ -51,7 +51,9 @@ public class SecurityConfig {
 	@Bean
 	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		http
-			// JWT 방식에서는 브라우저 세션 쿠키를 쓰지 않으므로 CSRF 보호가 필요 없습니다.
+			// 상태 변경 API 인증은 Authorization 헤더의 Access Token을 사용합니다. 브라우저가 자동으로
+			// 보내는 Refresh Token 쿠키는 /api/auth 경로·SameSite=Strict로 제한하고, 인증 API 자체에는
+			// Redis 요청 제한을 적용합니다. 이 구조에서는 일반 API에 CSRF 토큰을 요구하지 않습니다.
 			.csrf(csrf -> csrf.disable())
 			// 폼 로그인/HTTP Basic 대신 자체 로그인 API(/api/auth/login)를 사용합니다.
 			.formLogin(form -> form.disable())
