@@ -1891,6 +1891,8 @@ body.modal-open .sidebar {
 	color: var(--text-gray);
 	font-size: 13px;
 	line-height: 1.55;
+	word-break: keep-all;
+	text-wrap: balance;
 }
 
 .confirm-actions {
@@ -2643,20 +2645,6 @@ body.modal-open .sidebar {
 	color: #2e9e5b;
 }
 
-/* 타이핑 중 마지막 블록 끝의 깜빡이는 캐럿 */
-.message-bubble.markdown.typing > :last-child::after {
-	content: '▍';
-	margin-left: 1px;
-	color: var(--brand-pink, #d94f70);
-	animation: typing-caret-blink 0.9s steps(2, start) infinite;
-}
-
-@keyframes typing-caret-blink {
-	to {
-		visibility: hidden;
-	}
-}
-
 @media (prefers-reduced-motion: reduce) {
 	.sidebar,
 	.usage-guide-button,
@@ -2665,8 +2653,7 @@ body.modal-open .sidebar {
 		transition: none;
 	}
 
-	.typing-dots span,
-	.message-bubble.markdown.typing > :last-child::after {
+	.typing-dots span {
 		animation: none;
 	}
 }

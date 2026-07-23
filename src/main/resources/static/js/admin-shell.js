@@ -102,7 +102,7 @@
 		modal.innerHTML = '<div data-admin-logout-close></div>'
 			+ '<section role="dialog" aria-modal="true" aria-labelledby="adminLogoutTitle">'
 			+ '<i>↪</i><h2 id="adminLogoutTitle">정말로 로그아웃하시겠습니까?</h2>'
-			+ '<p>관리자 작업을 종료하고 로그인 화면으로 이동합니다.</p>'
+			+ '<p>관리자 작업을 마치고 로그인 화면으로 이동합니다.</p>'
 			+ '<footer><button id="adminLogoutCancel" type="button">취소</button>'
 			+ '<button id="adminLogoutConfirm" class="primary" type="button">로그아웃</button></footer>'
 			+ '</section>';

@@ -135,7 +135,7 @@ td:first-child { min-width: 180px; }
 .modal section { position: relative; width: min(380px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 26px; border-radius: 17px; background: var(--admin-surface); text-align: center; box-shadow: 0 24px 70px rgba(42, 23, 32, 0.24); }
 .modal section > i { display: grid; place-items: center; width: 48px; height: 48px; margin: 0 auto 14px; border-radius: 15px; background: var(--admin-primary-soft); color: var(--admin-primary); font-style: normal; font-weight: 900; }
 .modal h2 { margin: 0 0 8px; font-size: 19px; line-height: 1.35; }
-.modal p { color: var(--admin-muted); font-size: 12px; line-height: 1.6; }
+.modal p { color: var(--admin-muted); font-size: 12px; line-height: 1.6; word-break: keep-all; text-wrap: balance; }
 .modal footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; padding-top: 12px; }
 .modal footer button { min-width: 88px; min-height: 41px; padding: 8px 14px; border: 1px solid var(--admin-border); border-radius: 9px; background: var(--admin-surface); color: var(--admin-muted); font-weight: 800; cursor: pointer; }
 #cancelButton, #stateCancelButton { border: 1px solid var(--admin-border); background: var(--admin-surface); color: var(--admin-muted); }

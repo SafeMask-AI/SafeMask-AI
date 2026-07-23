@@ -8,6 +8,9 @@ import haitai.safemask.domain.auth.dto.SignupRequest;
 import haitai.safemask.domain.auth.dto.SignupResponse;
 import haitai.safemask.domain.auth.dto.TokenRefreshResponse;
 import haitai.safemask.domain.auth.dto.TokenRefreshResult;
+import haitai.safemask.domain.auth.config.AuthCookieProperties;
+import haitai.safemask.domain.auth.security.AuthRequestProtectionService;
+import haitai.safemask.domain.auth.security.AuthRequestProtectionService.RequestType;
 import haitai.safemask.domain.auth.service.AuthService;
 import haitai.safemask.global.exception.CustomException;
 import haitai.safemask.global.exception.ErrorCode;
@@ -15,6 +18,7 @@ import haitai.safemask.global.jwt.JwtProperties;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -53,10 +57,15 @@ public class AuthController {
 
 	private final AuthService authService;
 	private final JwtProperties jwtProperties;
+	private final AuthCookieProperties cookieProperties;
+	private final AuthRequestProtectionService requestProtectionService;
 
-	public AuthController(AuthService authService, JwtProperties jwtProperties) {
+	public AuthController(AuthService authService, JwtProperties jwtProperties,
+		AuthCookieProperties cookieProperties, AuthRequestProtectionService requestProtectionService) {
 		this.authService = authService;
 		this.jwtProperties = jwtProperties;
+		this.cookieProperties = cookieProperties;
+		this.requestProtectionService = requestProtectionService;
 	}
 
 	// ==================== 회원가입 단계별 확인 ====================
@@ -67,10 +76,12 @@ public class AuthController {
 	 */
 	@GetMapping("/check-login-id")
 	public ResponseEntity<DuplicateCheckResponse> checkLoginId(
+		HttpServletRequest servletRequest,
 		@RequestParam("loginId")
 		@NotBlank(message = "사번은 필수입니다.")
 		String loginId
 	) {
+		requestProtectionService.check(RequestType.DUPLICATE_CHECK, servletRequest);
 		return ResponseEntity.ok(authService.checkLoginId(loginId));
 	}
 
@@ -80,11 +91,13 @@ public class AuthController {
 	 */
 	@GetMapping("/check-email")
 	public ResponseEntity<DuplicateCheckResponse> checkEmail(
+		HttpServletRequest servletRequest,
 		@RequestParam("email")
 		@NotBlank(message = "이메일은 필수입니다.")
 		@Email(message = "올바른 이메일 형식이 아닙니다.")
 		String email
 	) {
+		requestProtectionService.check(RequestType.DUPLICATE_CHECK, servletRequest);
 		return ResponseEntity.ok(authService.checkEmail(email));
 	}
 
@@ -95,7 +108,9 @@ public class AuthController {
 	 * 성공 시 201 Created와 함께 생성된 회원 정보를 반환합니다.
 	 */
 	@PostMapping("/signup")
-	public ResponseEntity<SignupResponse> signup(@RequestBody @Valid SignupRequest request) {
+	public ResponseEntity<SignupResponse> signup(HttpServletRequest servletRequest,
+		@RequestBody @Valid SignupRequest request) {
+		requestProtectionService.check(RequestType.SIGNUP, servletRequest);
 		SignupResponse response = authService.signup(request);
 		return ResponseEntity.status(HttpStatus.CREATED).body(response);
 	}
@@ -108,8 +123,18 @@ public class AuthController {
 	 * 이후 API 호출 시 "Authorization: Bearer {accessToken}" 헤더를 사용합니다.
 	 */
 	@PostMapping("/login")
-	public ResponseEntity<LoginResponse> login(@RequestBody @Valid LoginRequest request) {
-		LoginResult result = authService.login(request);
+	public ResponseEntity<LoginResponse> login(HttpServletRequest servletRequest,
+		@RequestBody @Valid LoginRequest request) {
+		requestProtectionService.check(RequestType.LOGIN, servletRequest);
+		LoginResult result;
+		try {
+			result = authService.login(request);
+		} catch (CustomException exception) {
+			if (isAuditableLoginFailure(exception.getErrorCode())) {
+				requestProtectionService.auditLoginFailure(servletRequest, request.loginId(), exception.getErrorCode());
+			}
+			throw exception;
+		}
 
 		return ResponseEntity.ok()
 			.header(HttpHeaders.SET_COOKIE,
@@ -126,9 +151,11 @@ public class AuthController {
 	 */
 	@PostMapping("/refresh")
 	public ResponseEntity<TokenRefreshResponse> refresh(
+		HttpServletRequest servletRequest,
 		@CookieValue(value = REFRESH_TOKEN_COOKIE, required = false) String refreshToken,
 		@RequestHeader(value = "X-Remember-Login", required = false) String rememberLogin
 	) {
+		requestProtectionService.check(RequestType.REFRESH, servletRequest);
 		// 쿠키 자체가 없으면(만료·삭제됨) 재로그인 대상입니다.
 		if (refreshToken == null || refreshToken.isBlank()) {
 			throw new CustomException(ErrorCode.INVALID_REFRESH_TOKEN);
@@ -169,12 +196,12 @@ public class AuthController {
 	 * - httpOnly: JS(document.cookie)로 접근 불가 → XSS로 탈취 방지
 	 * - sameSite=Strict: 다른 사이트에서 시작된 요청에는 쿠키 미전송 → CSRF 방지
 	 * - path=/api/auth: 인증 API 요청에만 쿠키가 실려 불필요한 노출 최소화
-	 * - secure(false): 로컬 http 개발 환경용. HTTPS로 배포할 때 true로 바꿔야 합니다.
+	 * - secure: 로컬 HTTP와 운영 HTTPS를 설정으로 분리하며 prod 프로필에서는 true를 강제합니다.
 	 */
 	private ResponseCookie createRefreshTokenCookie(String token, boolean persistent) {
 		ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(REFRESH_TOKEN_COOKIE, token)
 			.httpOnly(true)
-			.secure(false)
+			.secure(cookieProperties.isSecure())
 			.sameSite("Strict")
 			.path("/api/auth");
 		if (persistent) {
@@ -187,10 +214,16 @@ public class AuthController {
 	private ResponseCookie expireRefreshTokenCookie() {
 		return ResponseCookie.from(REFRESH_TOKEN_COOKIE, "")
 			.httpOnly(true)
-			.secure(false)
+			.secure(cookieProperties.isSecure())
 			.sameSite("Strict")
 			.path("/api/auth")
 			.maxAge(0)
 			.build();
+	}
+
+	private boolean isAuditableLoginFailure(ErrorCode errorCode) {
+		return errorCode == ErrorCode.LOGIN_FAILED
+			|| errorCode == ErrorCode.APPROVAL_PENDING
+			|| errorCode == ErrorCode.APPROVAL_REJECTED;
 	}
 }

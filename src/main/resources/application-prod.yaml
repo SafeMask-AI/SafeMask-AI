@@ -1,0 +1,17 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+server:
+  # 같은 EC2 안의 NGINX만 Spring Boot에 접근합니다. 보안 그룹에서도 8080을 열지 않아야 합니다.
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  forward-headers-strategy: native
+
+safemask:
+  auth:
+    cookie:
+      secure: ${AUTH_COOKIE_SECURE:true}
+  # 원복된 민감정보가 들어갈 수 있어 prod에서는 OS 임시 디렉터리 기본값을 허용하지 않습니다.
+  storage:
+    base-path: ${FILE_STORAGE_PATH:}

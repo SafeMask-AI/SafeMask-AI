@@ -178,9 +178,16 @@
 
 	messageInput.addEventListener('input', resizeComposer);
 	messageList.addEventListener('scroll', function () {
+		// 질문을 위로 올리는 짧은 모션 중 발생한 프로그램 스크롤은
+		// 사용자가 자동 따라가기를 해제한 동작으로 오인하지 않는다.
+		if (turnAnchorAnimationFrame !== null) {
+			return;
+		}
 		autoFollowMessages = isMessageListNearBottom();
 		scrollLatestButton.hidden = autoFollowMessages;
 	});
+	messageList.addEventListener('wheel', cancelTurnAnchorAnimation, { passive: true });
+	messageList.addEventListener('touchstart', cancelTurnAnchorAnimation, { passive: true });
 	scrollLatestButton.addEventListener('click', function () {
 		autoFollowMessages = true;
 		scrollMessageListToBottom(true);
@@ -675,24 +682,34 @@
 
 	async function typeTextIntoBubble(bubble, text, shouldCancel, shouldSkip) {
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-			bubble.textContent = text;
+			renderAssistantBubble(bubble, text);
 			return;
 		}
-		// 답변은 서버에서 전체 원복·검증된 뒤 도착하지만, 화면에서는 ChatGPT처럼
-		// 사용자가 읽으면서 따라 내려갈 수 있는 속도로 펼친다. 짧은 답변은 틱당 1자
-		// (약 33자/초)로 또박또박 찍고, 긴 답변은 연출이 하염없이 길어지지 않도록
-		// 길이에 비례해 틱당 글자 수를 늘려 전체 연출 시간을 15초 안팎으로 제한한다.
-		const chunkSize = Math.max(1, Math.min(24, Math.ceil(text.length / 500)));
-		const baseDelay = 30;
-		// ChatGPT처럼 매 틱 "지금까지 보이는 텍스트 전체"를 마크다운으로 렌더링한다.
-		// 굵게(**)·코드블록이 원문 기호로 아래에 찍혔다가 줄이 완성되는 순간
-		// 서식 영역으로 튀어 올라가는 어색함을 없애기 위한 구조다.
-		// (renderMarkdown은 아직 닫히지 않은 ``` 펜스도 코드블록으로 처리하므로
-		// 코드는 처음부터 블록 안에서 자라나고, 깜빡이는 캐럿은 .typing CSS가 그린다)
+		// 완성된 답변 전체를 먼저 안전한 마크다운 DOM으로 만든 뒤 텍스트 노드만 드러냅니다.
+		// 부분 문자열을 매 틱 다시 파싱하면 **·백틱·목록·링크 같은 문법 기호가 닫히기 전
+		// 화면에 잠깐 노출되므로, 문법 구조는 처음부터 완성된 상태로 유지해야 합니다.
 		bubble.classList.add('markdown', 'typing');
+		bubble.innerHTML = renderMarkdown(text);
+
+		const textNodes = [];
+		const walker = document.createTreeWalker(bubble, NodeFilter.SHOW_TEXT);
+		let currentNode = walker.nextNode();
+		while (currentNode) {
+			textNodes.push({ node: currentNode, text: currentNode.nodeValue || '', visible: 0 });
+			currentNode.nodeValue = '';
+			currentNode = walker.nextNode();
+		}
+
+		const totalCharacters = textNodes.reduce(function (total, item) {
+			return total + item.text.length;
+		}, 0);
+		// 짧은 답변은 약 37자/초로 표시하고, 긴 답변은 전체 연출이 14초 안팎을 넘지 않게 합니다.
+		const chunkSize = Math.max(1, Math.min(24, Math.ceil(totalCharacters / 500)));
+		const baseDelay = 27;
+		let textNodeIndex = 0;
 
 		try {
-			for (let i = 0; i < text.length; i += chunkSize) {
+			while (textNodeIndex < textNodes.length) {
 				if (shouldCancel && shouldCancel()) {
 					throw new DOMException('Aborted', 'AbortError');
 				}
@@ -701,14 +718,23 @@
 				if (shouldSkip && shouldSkip()) {
 					break;
 				}
-				const visibleEnd = Math.min(text.length, i + chunkSize);
-				const visibleText = text.slice(0, visibleEnd);
-				bubble.innerHTML = renderMarkdown(visibleText);
-
-				// 사용자가 위로 스크롤해 읽고 있으면 위치를 빼앗지 않는다.
-				if (/[.!?。！？\n]$/.test(visibleText)) {
-					scrollMessageListToBottom();
+				let remaining = chunkSize;
+				while (remaining > 0 && textNodeIndex < textNodes.length) {
+					const item = textNodes[textNodeIndex];
+					const revealCount = Math.min(remaining, item.text.length - item.visible);
+					item.visible += revealCount;
+					remaining -= revealCount;
+					item.node.nodeValue = item.text.slice(0, item.visible);
+					if (item.visible >= item.text.length) {
+						textNodeIndex += 1;
+					}
 				}
+
+				// 자동 따라가기 상태에서는 답변이 화면 아래 경계를 넘는 순간부터 매 틱
+				// 증가분만큼 따라간다. 문장부호가 나올 때만 이동하면 긴 문장이 화면 밖에서
+				// 작성되는 동안 멈춘 것처럼 보이므로, 스크롤 여부는 함수 내부의
+				// autoFollowMessages와 실제 콘텐츠 overflow 판단에 맡긴다.
+				scrollMessageListToBottom();
 				await sleep(baseDelay);
 			}
 		} finally {
@@ -727,6 +753,7 @@
 	// 위→아래로 채워진다. 이를 위해 목록 맨 끝에 높이를 조절하는 스페이서를 두어
 	// 대화가 짧아도 질문을 위로 올릴 스크롤 공간을 확보한다.
 	let turnSpacer = null;
+	let turnAnchorAnimationFrame = null;
 
 	function ensureTurnSpacer() {
 		if (!turnSpacer) {
@@ -772,9 +799,52 @@
 		const contentEnd = messageList.scrollTop + (spacer.getBoundingClientRect().top - listRect.top);
 		const shortage = targetScrollTop + messageList.clientHeight - contentEnd;
 		spacer.style.height = Math.max(0, Math.round(shortage)) + 'px';
-		messageList.scrollTop = targetScrollTop;
 		autoFollowMessages = true;
 		scrollLatestButton.hidden = true;
+		animateTurnAnchor(targetScrollTop);
+	}
+
+	/**
+	 * 네이티브 smooth 스크롤 대신 질문 앵커링에만 짧은 ease-out을 적용한다.
+	 * 답변 타이핑 중의 자동 스크롤까지 느려지는 것을 피하고, 사용자의 직접 스크롤은
+	 * wheel/touchstart에서 즉시 이 모션을 취소할 수 있게 별도 프레임으로 관리한다.
+	 */
+	function animateTurnAnchor(targetScrollTop) {
+		cancelTurnAnchorAnimation();
+		const startScrollTop = messageList.scrollTop;
+		const distance = targetScrollTop - startScrollTop;
+		const reduceMotion = window.matchMedia
+			&& window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		if (reduceMotion || Math.abs(distance) < 2) {
+			messageList.scrollTop = targetScrollTop;
+			return;
+		}
+
+		const duration = 260;
+		let startedAt = null;
+		function step(timestamp) {
+			if (startedAt === null) {
+				startedAt = timestamp;
+			}
+			const progress = Math.min(1, (timestamp - startedAt) / duration);
+			const easedProgress = 1 - Math.pow(1 - progress, 3);
+			messageList.scrollTop = startScrollTop + (distance * easedProgress);
+			if (progress < 1) {
+				turnAnchorAnimationFrame = window.requestAnimationFrame(step);
+				return;
+			}
+			turnAnchorAnimationFrame = null;
+			messageList.scrollTop = targetScrollTop;
+		}
+		turnAnchorAnimationFrame = window.requestAnimationFrame(step);
+	}
+
+	function cancelTurnAnchorAnimation() {
+		if (turnAnchorAnimationFrame === null) {
+			return;
+		}
+		window.cancelAnimationFrame(turnAnchorAnimationFrame);
+		turnAnchorAnimationFrame = null;
 	}
 
 	/**
@@ -799,6 +869,13 @@
 	}
 
 	function scrollMessageListToBottom(force) {
+		if (force) {
+			cancelTurnAnchorAnimation();
+		} else if (turnAnchorAnimationFrame !== null) {
+			// 질문이 자리 잡는 260ms 동안 상태 행이나 매우 빠른 응답이 스크롤 위치를
+			// 다시 바꾸지 않게 하고, 모션이 끝난 뒤부터 평소 자동 따라가기를 재개한다.
+			return;
+		}
 		if (!force && !autoFollowMessages) {
 			scrollLatestButton.hidden = false;
 			return;
@@ -2684,7 +2761,7 @@
 	document.getElementById('logoutButton').addEventListener('click', async function () {
 		const approved = await openConfirmDialog({
 			title: '정말 로그아웃하시겠습니까?',
-			description: '로그아웃하면 현재 기기의 로그인 정보가 안전하게 삭제됩니다.',
+			description: '현재 기기의 로그인 정보를 안전하게 삭제합니다.',
 			approveLabel: '로그아웃'
 		});
 		if (!approved) {

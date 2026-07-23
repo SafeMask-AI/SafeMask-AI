@@ -1,0 +1,48 @@
+# /etc/nginx/sites-available/safemask 예시입니다.
+# example.com을 실제 도메인으로 바꾸고 Certbot이 발급한 인증서 경로를 적용하세요.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name example.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name example.com;
+
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+    # 임시 배포는 짧은 HSTS로 시작하고, 장기 운영이 확정되면 기간을 늘립니다.
+    add_header Strict-Transport-Security "max-age=86400" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Spring multipart max-request-size(25MB)와 같은 한도로 맞춥니다.
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # AI 진행 SSE를 즉시 전달하고 OpenAI 요청보다 긴 시간 동안 연결을 유지합니다.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 240s;
+        proxy_send_timeout 240s;
+    }
+}
