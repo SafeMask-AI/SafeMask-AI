@@ -9,6 +9,7 @@ import haitai.safemask.domain.monitoring.dto.AdminMonitoringResponse;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AdminMonitoringService {
 
 	private static final int TREND_DAYS = 7;
+	private static final ZoneId KOREA_ZONE = ZoneId.of("Asia/Seoul");
 
 	private final AiRunRepository aiRunRepository;
 	private final MaskingEntityRepository maskingEntityRepository;
@@ -47,7 +49,7 @@ public class AdminMonitoringService {
 	}
 
 	public AdminMonitoringResponse dashboard() {
-		LocalDate today = LocalDate.now();
+		LocalDate today = LocalDate.now(KOREA_ZONE);
 		LocalDateTime todayStart = today.atStartOfDay();
 		LocalDateTime trendStart = today.minusDays(TREND_DAYS - 1L).atStartOfDay();
 
@@ -73,7 +75,7 @@ public class AdminMonitoringService {
 			: health("ai", "AI 처리", "ERROR", "DB 상태 복구 후 확인할 수 있습니다."));
 
 		return new AdminMonitoringResponse(
-			LocalDateTime.now(), data.today(), data.trend(), data.maskingTypes(), data.outcomes(), systems);
+			LocalDateTime.now(KOREA_ZONE), data.today(), data.trend(), data.maskingTypes(), data.outcomes(), systems);
 	}
 
 	private DashboardData loadDashboardData(LocalDateTime todayStart, LocalDateTime trendStart, LocalDate today) {
