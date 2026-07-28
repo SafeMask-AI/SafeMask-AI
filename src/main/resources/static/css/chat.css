@@ -1123,21 +1123,47 @@ body.modal-open .sidebar {
 	resize: vertical;
 }
 
+/* 같은 모달의 확인·취소 버튼(height 44px)과 크기를 맞춰, 탐지 내역을 더 볼 수 있다는
+   신호가 묻히지 않게 한다. 배경만 옅은 분홍이던 이전 스타일은 주변 카드와 구분이 약했다. */
 .preview-detail-toggle {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: auto;
-	height: 36px;
-	margin: 8px 22px 0;
-	padding: 0 11px;
-	border: 1px solid #eee1e7;
-	border-radius: 8px;
-	background: #fffafd;
+	gap: 7px;
+	/* button은 width:auto가 내용 크기로 줄어들어 부모를 채우지 않는다. 좌우 22px 여백을
+	   뺀 나머지를 명시해, 위아래 입력 요소와 같은 폭·같은 선에 맞춘다.
+	   width:100%로 두면 좌우 여백만큼 오른쪽으로 삐져나간다. */
+	width: calc(100% - 44px);
+	height: 44px;
+	margin: 10px 22px 0;
+	padding: 0 16px;
+	border: 1px solid var(--brand-pink);
+	border-radius: 10px;
+	background: #fff0f7;
 	color: var(--brand-pink-dark);
-	font-size: 12px;
+	font-size: 14px;
 	font-weight: 800;
 	cursor: pointer;
+	transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+/* 오른쪽 꺾쇠로 별도 상세 화면이 열린다는 것을 알린다. */
+.preview-detail-toggle::after {
+	content: '';
+	width: 7px;
+	height: 7px;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	transform: rotate(-45deg);
+}
+
+.preview-detail-toggle:hover {
+	border-color: var(--brand-pink-dark);
+	background: #ffe3f0;
+}
+
+.preview-detail-toggle:active {
+	background: #ffd6ea;
 }
 
 .preview-detail-toggle[hidden] {
@@ -2429,6 +2455,11 @@ body.modal-open .sidebar {
 		margin-inline: 16px;
 	}
 
+	/* 좁은 화면에서는 좌우 여백이 16px로 줄어드므로 버튼 폭도 함께 맞춘다. */
+	.preview-detail-toggle {
+		width: calc(100% - 32px);
+	}
+
 	.preview-prompt-editor textarea {
 		min-height: 72px;
 	}
@@ -2918,10 +2949,20 @@ html[data-theme='dark'] .preview-prompt-editor textarea {
 	color: var(--text-dark);
 }
 
+/* 어두운 화면에서도 버튼임이 드러나도록 회색 대신 브랜드 색 계열을 유지한다. */
 html[data-theme='dark'] .preview-detail-toggle {
-	border-color: #423840;
-	background: #2e262d;
-	color: var(--text-dark);
+	border-color: #8c3a63;
+	background: #3a2833;
+	color: #ff9ec9;
+}
+
+html[data-theme='dark'] .preview-detail-toggle:hover {
+	border-color: #b04a7e;
+	background: #47303d;
+}
+
+html[data-theme='dark'] .preview-detail-toggle:active {
+	background: #533746;
 }
 
 html[data-theme='dark'] .preview-feedback {
