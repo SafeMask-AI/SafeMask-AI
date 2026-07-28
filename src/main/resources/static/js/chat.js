@@ -61,6 +61,13 @@
 	// 긴 첨부는 전체 전송하되 브라우저에는 일부만 렌더링해 확인 창이 멈추지 않게 한다.
 	const MAX_TRANSMISSION_DISPLAY_CHARS = 30_000;
 
+	// 타이핑 연출에서 글자가 시작되기 전까지 감춰 둘 구조 태그.
+	// td/th는 제외한다. 셀을 감추면 같은 행의 열 정렬이 무너지므로 행(tr) 단위로만 제어한다.
+	const REVEAL_BLOCK_TAGS = [
+		'P', 'LI', 'UL', 'OL', 'TR', 'TABLE', 'THEAD', 'TBODY',
+		'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE', 'BLOCKQUOTE'
+	];
+
 	const MASKING_TYPE_LABELS = {
 		NAME: '이름',
 		PHONE: '전화번호',
@@ -695,7 +702,22 @@
 		const walker = document.createTreeWalker(bubble, NodeFilter.SHOW_TEXT);
 		let currentNode = walker.nextNode();
 		while (currentNode) {
-			textNodes.push({ node: currentNode, text: currentNode.nodeValue || '', visible: 0 });
+			// 각 텍스트가 속한 구조 블록을 함께 숨겨 두었다가 그 블록의 첫 글자가 나올 때
+			// 드러냅니다. 표는 한 행씩, 목록은 한 항목씩 늘어나게 되어 빈 골격이 미리
+			// 보이지 않습니다. 셀(td/th)은 감추면 열 정렬이 흔들리므로 행 단위로만 다룹니다.
+			const pendingBlocks = [];
+			for (let element = currentNode.parentElement; element && element !== bubble; element = element.parentElement) {
+				if (REVEAL_BLOCK_TAGS.indexOf(element.tagName) >= 0) {
+					element.classList.add('reveal-pending');
+					pendingBlocks.push(element);
+				}
+			}
+			textNodes.push({
+				node: currentNode,
+				text: currentNode.nodeValue || '',
+				visible: 0,
+				pendingBlocks: pendingBlocks
+			});
 			currentNode.nodeValue = '';
 			currentNode = walker.nextNode();
 		}
@@ -722,6 +744,12 @@
 				while (remaining > 0 && textNodeIndex < textNodes.length) {
 					const item = textNodes[textNodeIndex];
 					const revealCount = Math.min(remaining, item.text.length - item.visible);
+					// 첫 글자가 나오는 순간 이 텍스트를 감싼 블록들을 드러냅니다.
+					if (item.visible === 0 && revealCount > 0) {
+						item.pendingBlocks.forEach(function (element) {
+							element.classList.remove('reveal-pending');
+						});
+					}
 					item.visible += revealCount;
 					remaining -= revealCount;
 					item.node.nodeValue = item.text.slice(0, item.visible);

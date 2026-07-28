@@ -2522,6 +2522,13 @@ body.modal-open .sidebar {
 	white-space: normal;
 }
 
+/* 타이핑 연출 중 아직 글자가 시작되지 않은 블록을 감춰, 빈 표·빈 목록 골격이
+   먼저 그려지는 것을 막습니다. .typing이 붙어 있을 때만 적용하므로 연출이
+   끝나거나 사용자가 건너뛰면 남은 블록이 자동으로 모두 드러납니다. */
+.message-bubble.typing .reveal-pending {
+	display: none;
+}
+
 .message-bubble.markdown p {
 	margin: 0 0 10px;
 }
