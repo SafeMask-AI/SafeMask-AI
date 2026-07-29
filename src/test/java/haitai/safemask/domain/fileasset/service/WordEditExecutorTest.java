@@ -9,6 +9,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
+import org.apache.poi.xwpf.usermodel.ParagraphAlignment;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
@@ -47,16 +48,76 @@ class WordEditExecutorTest {
 	}
 
 	@Test
-	@DisplayName("문단 삭제와 문서 끝 문단 추가를 순서대로 적용한다")
-	void deleteAndAppendParagraph() throws IOException {
-		byte[] original = documentWithParagraphs("유지 문단", "삭제 대상 문단");
+	@DisplayName("문단 추가는 마지막 본문 문단의 서식을 상속한다")
+	void appendParagraphInheritsNearestBodyFormatting() throws IOException {
+		byte[] original;
+		try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+			XWPFParagraph body = document.createParagraph();
+			body.setAlignment(ParagraphAlignment.BOTH);
+			body.setSpacingAfter(240);
+			XWPFRun run = body.createRun();
+			run.setFontFamily("맑은 고딕");
+			run.setFontSize(12);
+			run.setColor("244062");
+			run.setText("유지 문단");
+			document.createParagraph().createRun().setText("삭제 대상 문단");
+			document.write(out);
+			original = out.toByteArray();
+		}
 		byte[] edited = executor.apply(original, instruction(
 			new Op("delete_paragraph", null, null, "삭제 대상", null),
-			new Op("append_paragraph", null, null, null, "추가 문단")));
+			new Op("append_paragraph", null, null, null, "추가 문단", "body")));
 
 		try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(edited))) {
 			assertThat(document.getParagraphs()).extracting(XWPFParagraph::getText)
 				.containsExactly("유지 문단", "추가 문단");
+			XWPFParagraph appended = document.getParagraphArray(1);
+			assertThat(appended.getAlignment()).isEqualTo(ParagraphAlignment.BOTH);
+			assertThat(appended.getSpacingAfter()).isEqualTo(240);
+			assertThat(appended.getRuns().get(0).getFontFamily()).isEqualTo("맑은 고딕");
+			assertThat(appended.getRuns().get(0).getFontSizeAsDouble()).isEqualTo(12);
+			assertThat(appended.getRuns().get(0).getColor()).isEqualTo("244062");
+		}
+	}
+
+	@Test
+	@DisplayName("title 역할은 마지막 문단이 아니라 기존 제목 서식을 선택한다")
+	void appendTitleUsesExistingTitleFormatting() throws IOException {
+		byte[] original;
+		try (XWPFDocument document = new XWPFDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+			XWPFParagraph title = document.createParagraph();
+			title.setStyle("Title");
+			XWPFRun titleRun = title.createRun();
+			titleRun.setBold(true);
+			titleRun.setFontSize(20);
+			titleRun.setColor("17365D");
+			titleRun.setText("기존 제목");
+			document.createParagraph().createRun().setText("기존 본문");
+			document.write(out);
+			original = out.toByteArray();
+		}
+
+		byte[] edited = executor.apply(original, instruction(
+			new Op("append_paragraph", null, null, null, "새 요약", "title")));
+
+		try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(edited))) {
+			XWPFRun appended = document.getParagraphArray(2).getRuns().get(0);
+			assertThat(appended.isBold()).isTrue();
+			assertThat(appended.getFontSizeAsDouble()).isEqualTo(20);
+			assertThat(appended.getColor()).isEqualTo("17365D");
+		}
+	}
+
+	@Test
+	@DisplayName("문단 삭제 뒤 이어지는 치환은 분리된 XML 문단을 건드리지 않는다")
+	void replaceAfterDeleteUsesOnlyAttachedParagraphs() throws IOException {
+		byte[] edited = executor.apply(documentWithParagraphs("삭제할 김민수", "유지할 김민수"), instruction(
+			new Op("delete_paragraph", null, null, "삭제할", null),
+			new Op("replace_text", "김민수", "이서연", null, null)));
+
+		try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(edited))) {
+			assertThat(document.getParagraphs()).extracting(XWPFParagraph::getText)
+				.containsExactly("유지할 이서연");
 		}
 	}
 
