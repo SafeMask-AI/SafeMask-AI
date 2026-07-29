@@ -16,10 +16,18 @@ public record WordEditInstruction(String result, List<Op> ops) {
 	 * <ul>
 	 *   <li>replace_text: from, to</li>
 	 *   <li>delete_paragraph: contains</li>
-	 *   <li>append_paragraph: text</li>
+	 *   <li>append_paragraph: text, styleRole</li>
 	 * </ul>
+	 *
+	 * <p>{@code styleRole}은 모델이 글꼴이나 크기를 임의로 정하는 값이 아닙니다.
+	 * 서버가 원본 문서 안에서 역할이 같은 문단을 찾아 실제 서식을 상속하기 위한
+	 * 의미 힌트이며, 지원 값은 {@code auto/title/body/list}입니다.
 	 */
 	@JsonIgnoreProperties(ignoreUnknown = true)
-	public record Op(String op, String from, String to, String contains, String text) {
+	public record Op(String op, String from, String to, String contains, String text, String styleRole) {
+		/** 기존 AI 응답과 저장된 테스트 지시의 하위 호환성을 유지합니다. */
+		public Op(String op, String from, String to, String contains, String text) {
+			this(op, from, to, contains, text, null);
+		}
 	}
 }

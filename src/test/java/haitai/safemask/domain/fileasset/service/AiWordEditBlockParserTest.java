@@ -13,7 +13,10 @@ class AiWordEditBlockParserTest {
 	void parsesWordEditBlock() {
 		String answer = """
 			[[SAFEMASK_WORD_EDIT file="보고서.docx"]]
-			{"result":"보고서_수정.docx","ops":[{"op":"replace_text","from":"[PERSON_001]","to":"[PERSON_002]"}]}
+			{"result":"보고서_수정.docx","ops":[
+			  {"op":"replace_text","from":"[PERSON_001]","to":"[PERSON_002]"},
+			  {"op":"append_paragraph","text":"요약","styleRole":"title"}
+			]}
 			[[/SAFEMASK_WORD_EDIT]]
 			""";
 
@@ -22,5 +25,6 @@ class AiWordEditBlockParserTest {
 		assertThat(blocks).hasSize(1);
 		assertThat(blocks.get(0).targetFileName()).isEqualTo("보고서.docx");
 		assertThat(blocks.get(0).instruction().ops().get(0).op()).isEqualTo("replace_text");
+		assertThat(blocks.get(0).instruction().ops().get(1).styleRole()).isEqualTo("title");
 	}
 }
