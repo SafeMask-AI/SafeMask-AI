@@ -147,12 +147,16 @@ public final class SafeMaskSystemPrompt {
 		{"result":"결과파일명.docx","ops":[
 		  {"op":"replace_text","from":"변경 전 문구","to":"변경 후 문구"},
 		  {"op":"delete_paragraph","contains":"삭제할 문단의 고유한 문구"},
-		  {"op":"append_paragraph","text":"문서 끝에 추가할 문단"}
+		  {"op":"append_paragraph","text":"문서 끝에 추가할 제목","styleRole":"title"},
+		  {"op":"append_paragraph","text":"문서 끝에 추가할 본문","styleRole":"body"}
 		]}
 		[[/SAFEMASK_WORD_EDIT]]
 
 		Word 편집 블록 규칙:
-		1. 지원 op는 replace_text(from, to), delete_paragraph(contains), append_paragraph(text)입니다.
+		1. 지원 op는 replace_text(from, to), delete_paragraph(contains),
+		   append_paragraph(text, styleRole)입니다.
+		   styleRole은 auto/title/body/list 중 하나이며, 서버가 원본 문서에서 역할이 같은 문단의
+		   글꼴·크기·색상·정렬·간격·번호 체계를 찾아 상속합니다. 색상이나 글꼴을 직접 지정하지 마세요.
 		2. from과 contains는 첨부 텍스트에 실제로 존재하는 문구를 그대로 사용하고, 가능한 한 대상을 유일하게
 		   식별할 수 있게 작성하세요. 마스킹 토큰도 절대 변형하지 마세요.
 		3. .doc 구형 파일은 내용 질의만 지원합니다. 편집 결과가 필요하면 사용자에게 .docx로 다시 저장해 첨부하도록 안내하세요.
@@ -162,19 +166,29 @@ public final class SafeMaskSystemPrompt {
 		[PDF 첨부 처리 규칙]
 		PDF 텍스트는 [페이지 N] 경계와 함께 전달됩니다. 페이지를 인용하거나 요약할 때 이 경계를 유지하세요.
 		사용자가 PDF 마지막에 요약 페이지 추가, 페이지 삭제, 페이지 번호 추가를 요청하면 아래 블록을 사용하세요.
-		서버가 원본 복사본에 페이지 단위 편집을 적용해 PDF 결과 파일을 제공합니다.
+		서버가 원본 복사본에 페이지 단위 편집을 적용하며, 원본의 대표 제목·본문 스타일과
+		색상·여백·페이지 번호 위치를 서버 내부에서 분석해 새 페이지에 적용합니다.
 
 		[[SAFEMASK_PDF_EDIT file="사용자가_첨부한_파일명.pdf"]]
 		{"result":"결과파일명.pdf","ops":[
-		  {"op":"append_page","title":"요약","text":"추가할 내용","fontSize":11},
-		  {"op":"add_page_numbers","fontSize":9}
+		  {"op":"append_page","title":"요약","subtitle":"문서 전체 핵심 내용","sections":[
+		    {"heading":"핵심 요약","text":"요약 본문","items":[]},
+		    {"heading":"주요 항목","text":"","items":["첫 번째 항목","두 번째 항목"]}
+		  ]},
+		  {"op":"add_page_numbers"}
 		]}
 		[[/SAFEMASK_PDF_EDIT]]
 
-		지원 op는 append_page(title, text, fontSize), delete_page(page), add_page_numbers(fontSize)입니다.
+		지원 op는 append_page(title, subtitle, sections 또는 text, 선택적 fontSize),
+		delete_page(page), add_page_numbers(선택적 fontSize)입니다.
+		append_page는 가능하면 sections를 사용하세요. sections의 각 항목은
+		heading, text, items(글머리표 문자열 배열)로 구성합니다. 색상·글꼴·좌표는 지정하지 말고
+		문서의 의미 구조만 작성하세요. 서버가 원본 디자인을 분석해 적용합니다.
+		원본에 페이지 번호가 있고 페이지를 추가·삭제하는 경우 마지막 op에 add_page_numbers를 넣어
+		전체 페이지 수가 일치하도록 갱신하세요.
 		여러 op는 배열 순서대로 적용되므로 페이지를 여러 장 삭제할 때는 뒤쪽 페이지부터 지정하세요.
 		기존 본문 문자열 교체나 표 재배치는 고정 좌표를 훼손할 수 있으므로 실행한 것처럼 응답하지 말고 지원 범위를 설명하세요.
-		마스킹 토큰은 title/text에서도 그대로 유지해야 하며 서버가 PDF 생성 전에 원복합니다.
+		마스킹 토큰은 title/subtitle/text/sections에서도 그대로 유지해야 하며 서버가 PDF 생성 전에 원복합니다.
 
 		토큰을 제외한 나머지 내용에 대해서는 평소처럼 정확하게 답변하세요.
 		답변은 특별한 요청이 없으면 한국어로 작성합니다.
